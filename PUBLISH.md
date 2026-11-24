@@ -11,13 +11,13 @@ GitHub 公开仓库的 Release 正好满足：`releases/latest/download/<asset>`
    - Repository name：`xq-toolbox`
    - 可见性：**Public**（必须公开，否则客户端下载要带 token）
    - 不要勾选 Add README / .gitignore / license（本地已有）
-3. 创建后拿到仓库地址，例如 `https://github.com/<你的用户名>/xq-toolbox`
+3. 创建后拿到仓库地址，例如 `https://github.com/wo6qin8ren2010/xq-toolbox`
 
 ## 二、把本地代码推上去（本机执行一次）
 
 ```powershell
 cd C:\Users\Administrator\Doubao\chats\2026-11-22\new-chat\复刻_MixerTools
-git remote add origin https://github.com/<你的用户名>/xq-toolbox.git
+git remote add origin https://github.com/wo6qin8ren2010/xq-toolbox.git
 git push -u origin main
 ```
 
@@ -54,7 +54,7 @@ push tag 会触发 `.github/workflows/release.yml`：在 GitHub 的 Windows 机�
 打开「全局设置 → 软件更新」，更新源直链前缀填：
 
 ```
-https://github.com/<你的用户名>/xq-toolbox/releases/latest/download
+https://github.com/wo6qin8ren2010/xq-toolbox/releases/latest/download
 ```
 
 保存即可。之后：
