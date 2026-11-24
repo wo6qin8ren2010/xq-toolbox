@@ -18,7 +18,7 @@ import urllib.request
 from .library import DATA_DIR
 from .paths import log
 
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 CFG_FILE = os.path.join(DATA_DIR, "更新设置.json")
 DL_DIR = os.path.join(DATA_DIR, "更新下载")
 PENDING_META = os.path.join(DL_DIR, "pending.json")
@@ -169,8 +169,9 @@ def apply(pending: str, relaunch: bool = True, meta: str = "") -> None:
     with open(ps1, "w", encoding="utf-8-sig") as fh:
         fh.write(UPDATER_PS1)
     proc_name = os.path.splitext(os.path.basename(target))[0]
-    flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-    cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1,
+    # CREATE_NO_WINDOW：子进程带独立隐藏控制台，主进程退出后被系统一并回收
+    flags = 0x08000000 | 0x00000200  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+    cmd = ["powershell.exe", "-NoProfile", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", ps1,
            "-New", pending, "-Target", target, "-ProcName", proc_name]
     if meta:
         cmd += ["-Meta", meta]
