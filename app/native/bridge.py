@@ -692,14 +692,14 @@ class Bridge:
     def _cmd_update_state(self, args, raw):
         cfg = update.read_cfg()
         payload = {"version": update.APP_VERSION, "auto": cfg["auto"], "silent": cfg["silent"], "base": cfg["base"]}
-        # 上次静默下载好的更新包：挂"退出后覆盖"脚本，下次启动即新版
+        # 上次静默下载好的更新包：挂"退出后覆盖并重启"脚本
         try:
             if update.arm_pending():
                 meta = update.read_pending() or {}
                 self.bus.push("update_check_result|auto|" + json.dumps({
                     "status": "silent_armed",
                     "version": meta.get("version", ""),
-                    "msg": "新版本 v%s 已就绪，本次退出后自动套用，下次启动即新版" % meta.get("version", ""),
+                    "msg": "新版本 v%s 已就绪，本次退出后自动套用并重启新版" % meta.get("version", ""),
                 }, ensure_ascii=False))
         except Exception as exc:
             log("自动更新", "挂载待套用更新失败：%s" % exc, "警告")
@@ -740,7 +740,7 @@ class Bridge:
                     "status": "silent_ready",
                     "version": res["version"],
                     "armed": bool(armed),
-                    "msg": "新版本 v%s 已后台下载并校验，本次退出后自动套用，下次启动即新版" % res["version"],
+                    "msg": "新版本 v%s 已后台下载并校验，本次退出后自动套用并重启新版" % res["version"],
                 }
         except Exception as exc:
             res = {"status": "error", "msg": "检查更新失败：%s" % exc}

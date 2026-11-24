@@ -18,7 +18,7 @@ import urllib.request
 from .library import DATA_DIR
 from .paths import log
 
-APP_VERSION = "1.0.11"
+APP_VERSION = "1.0.12"
 CFG_FILE = os.path.join(DATA_DIR, "更新设置.json")
 DL_DIR = os.path.join(DATA_DIR, "更新下载")
 PENDING_META = os.path.join(DL_DIR, "pending.json")
@@ -149,6 +149,28 @@ def download_and_verify(url: str, sha256: str) -> str:
 UPDATER_PS1 = """param([string]$New,[string]$Target,[string]$ProcName,[string]$Meta,[switch]$NoRelaunch,[string]$Sha)
 $ErrorActionPreference = 'Stop'
 # 全部使用 .NET 接口，不依赖任何 PowerShell 模块（避免 PSModulePath 异常导致 cmdlet 缺失）
+if (-not [System.IO.File]::Exists($New)) { exit }
+# 同一时间只允许一个替换脚本运行，避免重复覆盖与重复重启
+$lock = "${Target}.updlock"
+$haveLock = $false
+for ($t = 0; $t -lt 2; $t++) {
+    try {
+        $lf = [System.IO.File]::Open($lock, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        $lb = [System.Text.Encoding]::ASCII.GetBytes([string]$PID)
+        $lf.Write($lb, 0, $lb.Length)
+        $lf.Dispose()
+        $haveLock = $true
+        break
+    } catch {
+        $old = 0
+        try { $old = [int]([System.IO.File]::ReadAllText($lock).Trim()) } catch {}
+        $alive = $false
+        if ($old -gt 0) { try { [System.Diagnostics.Process]::GetProcessById($old) | Out-Null; $alive = $true } catch {} }
+        if ($alive) { break }
+        try { [System.IO.File]::Delete($lock) } catch {}
+    }
+}
+if (-not $haveLock) { exit }
 for ($i = 0; $i -lt 7200; $i++) {
     if ([System.Diagnostics.Process]::GetProcessesByName($ProcName).Length -eq 0) { break }
     [System.Threading.Thread]::Sleep(1000)
@@ -181,10 +203,20 @@ if ($done) {
     try { [System.IO.File]::Delete($New) } catch {}
     try { if ($Meta -and [System.IO.File]::Exists($Meta)) { [System.IO.File]::Delete($Meta) } } catch {}
     try { [System.IO.File]::Delete($backup) } catch {}
-    if (-not $NoRelaunch) { [System.Diagnostics.Process]::Start($Target) | Out-Null }
+    if (-not $NoRelaunch) {
+        # 覆盖成功后自动拉起新版，工作目录设为程序所在目录
+        try {
+            $psi = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi.FileName = $Target
+            $psi.WorkingDirectory = [System.IO.Path]::GetDirectoryName($Target)
+            $psi.UseShellExecute = $true
+            [System.Diagnostics.Process]::Start($psi) | Out-Null
+        } catch {}
+    }
 } else {
     try { if ([System.IO.File]::Exists($stage)) { [System.IO.File]::Delete($stage) } } catch {}
 }
+try { [System.IO.File]::Delete($lock) } catch {}
 try { [System.IO.File]::Delete($PSCommandPath) } catch {}
 """
 
@@ -212,7 +244,7 @@ def apply(pending: str, relaunch: bool = True, meta: str = "", sha: str = "") ->
     env = dict(os.environ)
     env.pop("PSModulePath", None)
     subprocess.Popen(cmd, creationflags=flags, close_fds=True, env=env)
-    log("自动更新", "自替换脚本已拉起（relaunch=%s），等待本进程退出后覆盖" % relaunch, "成功")
+    log("自动更新", "自替换脚本已拉起（relaunch=%s），退出后覆盖%s" % (relaunch, "并自动重启新版" if relaunch else ""), "成功")
 
 
 def stage(url: str, sha256: str, version: str) -> dict:
@@ -245,14 +277,22 @@ def read_pending():
         return None
 
 
+_ARMED_SHA = ""
+
+
 def arm_pending() -> bool:
-    """启动时若有待套用更新包：挂一个等本进程退出后覆盖的脚本（不重启）。"""
+    """有待套用更新包时：挂一个等本进程退出后覆盖并自动重启新版的脚本。"""
+    global _ARMED_SHA
     meta = read_pending()
     if not meta:
         return False
+    sha = str(meta.get("sha256", "") or "")
+    if sha and sha == _ARMED_SHA:
+        return True  # 同一个包已挂载，避免重复拉起导致重复重启
     try:
-        apply(meta["path"], relaunch=False, meta=PENDING_META, sha=str(meta.get("sha256", "") or ""))
+        apply(meta["path"], relaunch=True, meta=PENDING_META, sha=sha)
     except Exception as exc:
         log("自动更新", "挂载静默更新失败：%s" % exc, "警告")
         return False
+    _ARMED_SHA = sha
     return True

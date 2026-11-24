@@ -10443,7 +10443,7 @@ function loadCategory(index, isRefreshOnly = false) {
                             <div class="setting-card group-item" style="flex-direction: column; align-items: stretch; gap: 12px;">
                                 <div class="setting-info" style="display: block;">
                                     <div class="setting-titleText">自动更新 <span id="xqUpdVer" style="font-size:12px;font-weight:600;color:var(--color-accent);margin-left:6px;"></span></div>
-                                    <div class="direct-download-subtitle" style="margin-top: 6px;">启动时按下方直链前缀读取 version.json 比对版本；未开静默时弹窗一键更新，开启静默后后台下载校验、本次退出自动覆盖、下次启动即新版。</div>
+                                    <div class="direct-download-subtitle" style="margin-top: 6px;">启动时按下方直链前缀读取 version.json 比对版本；未开静默时弹窗一键更新，开启静默后后台下载校验、本次退出自动覆盖并自动重启新版。</div>
                                 </div>
                                 <div class="direct-download-fields">
                                     <input id="xqUpdBase" class="direct-download-input" type="text" maxlength="300" autocomplete="off" spellcheck="false" placeholder="更新源直链前缀，如 https://你的存储域名/tools/">
@@ -10452,7 +10452,7 @@ function loadCategory(index, isRefreshOnly = false) {
                                     <input id="xqUpdAuto" type="checkbox" checked style="accent-color:#2f86f6;">启动时自动检查更新
                                 </label>
                                 <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--color-text-secondary);cursor:pointer;">
-                                    <input id="xqUpdSilent" type="checkbox" style="accent-color:#2f86f6;">静默更新：发现新版后台下载校验，本次退出后自动覆盖，下次启动即新版（不弹窗、不打断）
+                                    <input id="xqUpdSilent" type="checkbox" style="accent-color:#2f86f6;">静默更新：发现新版后台下载校验，本次退出后自动覆盖并自动重启新版（不弹窗、不打断）
                                 </label>
                                 <div style="display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap;">
                                     <button type="button" class="direct-download-button" onclick="window.xqUpdCheck()">检查更新</button>
