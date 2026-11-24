@@ -11,13 +11,14 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.parse
 import urllib.request
 
 from .library import DATA_DIR
 from .paths import log
 
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.0.2"
 CFG_FILE = os.path.join(DATA_DIR, "更新设置.json")
 DL_DIR = os.path.join(DATA_DIR, "更新下载")
 PENDING_META = os.path.join(DL_DIR, "pending.json")
@@ -62,6 +63,19 @@ def _get(url: str, timeout: float):
     return urllib.request.urlopen(req, timeout=timeout)
 
 
+def _get_retry(url: str, timeout: float, tries: int = 2):
+    """网络抖动时重试一次，避免偶发超时把整次检查判死。"""
+    last = None
+    for idx in range(max(1, tries)):
+        try:
+            return _get(url, timeout)
+        except Exception as exc:
+            last = exc
+            if idx + 1 < tries:
+                time.sleep(1.0)
+    raise last
+
+
 def check(base: str) -> dict:
     """拉 version.json 比对版本；返回 status=latest/available/nobase/error。"""
     base = str(base or "").strip()
@@ -71,7 +85,7 @@ def check(base: str) -> dict:
         return {"status": "error", "msg": "更新源地址需以 http:// 或 https:// 开头"}
     url = base.rstrip("/") + "/version.json"
     try:
-        with _get(url, 8) as resp:
+        with _get_retry(url, 25, 2) as resp:
             manifest = json.loads(resp.read().decode("utf-8-sig"))
     except Exception as exc:
         log("自动更新", "拉取版本清单失败：%s" % exc, "警告")
@@ -94,26 +108,42 @@ def check(base: str) -> dict:
 
 
 def download_and_verify(url: str, sha256: str) -> str:
-    """下载到 更新下载\\pending.exe 并校验 SHA256，返回落盘路径。"""
+    """下载到 更新下载\\pending.exe 并校验 SHA256，返回落盘路径。失败自动重试一次。"""
     os.makedirs(DL_DIR, exist_ok=True)
     target = os.path.join(DL_DIR, "pending.exe")
-    digest = hashlib.sha256()
-    size = 0
-    with _get(url, 60) as resp, open(target, "wb") as fh:
-        while True:
-            chunk = resp.read(262144)
-            if not chunk:
-                break
-            fh.write(chunk)
-            digest.update(chunk)
-            size += len(chunk)
-    if size < 1024 * 1024:
-        raise ValueError("下载文件过小（%d 字节），疑似直链失效" % size)
-    got = digest.hexdigest()
-    if sha256 and got != sha256.lower():
-        raise ValueError("SHA256 校验不一致，已丢弃下载包")
-    log("自动更新", "更新包下载完成：%d 字节，sha256=%s" % (size, got), "成功")
-    return target
+    last = None
+    for attempt in range(2):
+        digest = hashlib.sha256()
+        size = 0
+        started = time.time()
+        try:
+            with _get(url, 120) as resp, open(target, "wb") as fh:
+                while True:
+                    chunk = resp.read(262144)
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    digest.update(chunk)
+                    size += len(chunk)
+        except Exception as exc:
+            last = exc
+            log("自动更新", "下载中断（第 %d 次）：%s" % (attempt + 1, exc), "警告")
+            time.sleep(1.0)
+            continue
+        if size < 1024 * 1024:
+            last = ValueError("下载文件过小（%d 字节），疑似直链失效" % size)
+            log("自动更新", "下载文件异常：%d 字节，准备重试" % size, "警告")
+            time.sleep(1.0)
+            continue
+        got = digest.hexdigest()
+        if sha256 and got != sha256.lower():
+            last = ValueError("SHA256 校验不一致，已丢弃下载包")
+            log("自动更新", "SHA256 不一致（期望 %s，实际 %s），准备重试" % (str(sha256).lower(), got), "警告")
+            time.sleep(1.0)
+            continue
+        log("自动更新", "更新包下载完成：%d 字节，用时 %.1fs，sha256=%s" % (size, time.time() - started, got), "成功")
+        return target
+    raise last if last is not None else ValueError("下载失败")
 
 
 UPDATER_PS1 = """param([string]$New,[string]$Target,[string]$ProcName,[string]$Meta,[switch]$NoRelaunch)
