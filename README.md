@@ -1,6 +1,6 @@
 # 小庆工具箱
 
-**版本：v1.0.15（2026-11-25）**
+**版本：v1.0.16（2026-11-25）**
 
 一个 Windows 桌面工具箱：系统监控、软件下载、日常维护、音频调试与自建资料库，单文件绿色运行。
 
@@ -19,8 +19,11 @@
 
 - 系统：Windows 10 / 11（64 位，需 WebView2 运行时）
 - 直接使用：下载 Release 里的 `XQToolbox.exe`，双击即可，无需安装
+- 发给别人：只发这一个 exe 就够了。首次运行会自动释放内置的「小庆自用」资料库，并自动填好更新源、开启静默更新与自动重启
 - 源码运行：`python app/main.py`
 - 打包：`pip install -r requirements.txt` 后用 PyInstaller 打包（见 `.github/workflows/release.yml` 的完整参数）
+
+首次运行会在 `%LOCALAPPDATA%\MixerToolsRebuild\` 生成数据文件；已存在的文件不会被覆盖，升级或重装都不会丢自建库内容。
 
 ## 自动更新
 
@@ -30,13 +33,13 @@
 https://github.com/wo6qin8ren2010/xq-toolbox/releases/latest/download
 ```
 
-检查更新会读取该地址下的 `version.json`，比对版本、下载 `XQToolbox.exe` 并校验 SHA256；开启静默更新后，退出程序时自动替换并自动重启新版。
+检查更新会读取该地址下的 `version.json`，比对版本、下载 `XQToolbox.exe` 并校验 SHA256；开启静默更新后，退出程序时自动替换并自动重启新版。新用户首次运行已自动填好该地址，无需手动配置。
 
 ## 目录结构
 
 ```
 小庆工具箱/
-├─ app/              程序主体（main.py、native/ 各功能模块、ui/ 前端与资源）
+├─ app/              程序主体（main.py、native/ 各功能模块、ui/ 前端与资源、seed/ 首次运行释放的内置数据）
 ├─ admin/            自建库网页后台（server.py + ui/）
 ├─ requirements.txt  依赖
 ├─ PUBLISH.md        发布与自动更新手册
@@ -44,6 +47,11 @@ https://github.com/wo6qin8ren2010/xq-toolbox/releases/latest/download
 ```
 
 ## 版本记录
+
+### v1.0.16 — 2026-11-25
+
+- 单文件分发：把「小庆自用」资料库与更新源内置进 exe，新机器首次运行自动释放，只发一个 exe 即可
+- 首次运行自动开启自动检查 + 静默更新 + 退出自动重启；已有数据不覆盖
 
 ### v1.0.15 — 2026-11-25
 

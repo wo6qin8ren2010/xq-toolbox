@@ -32,6 +32,7 @@ jobs:
             '--name','XQToolbox',
             '--icon','app\app.ico',
             '--add-data','app\ui;ui',
+            '--add-data','app\seed;seed',
             '--add-data','admin;admin',
             '--collect-data','pywebview',
             '--hidden-import','clr',

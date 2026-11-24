@@ -19,6 +19,7 @@ import webview  # noqa: E402
 
 from native.bridge import Bridge  # noqa: E402
 from native import local_auth  # noqa: E402
+from native import seed  # noqa: E402
 from native.paths import log, ui_dir  # noqa: E402
 from native.push import PushBus  # noqa: E402
 
@@ -65,6 +66,7 @@ def main() -> None:
         return
     _dpi_aware()
     local_auth.ensure_default()
+    seed.ensure_seed()
     bus = PushBus()
     bridge = Bridge(bus)
 

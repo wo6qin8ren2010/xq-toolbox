@@ -19,7 +19,8 @@ import urllib.request
 from .library import DATA_DIR
 from .paths import log
 
-APP_VERSION = "1.0.15"
+APP_VERSION = "1.0.16"
+DEFAULT_BASE = "https://github.com/wo6qin8ren2010/xq-toolbox/releases/latest/download"
 CFG_FILE = os.path.join(DATA_DIR, "更新设置.json")
 DL_DIR = os.path.join(DATA_DIR, "更新下载")
 PENDING_META = os.path.join(DL_DIR, "pending.json")
