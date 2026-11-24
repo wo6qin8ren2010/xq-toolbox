@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自建库后台 · 调音师助理</title>
+<style>
+:root{
+  --bg:#f2f5f9; --panel:#ffffff; --line:#e3e8f0; --text:#1c2534; --muted:#6b7a90;
+  --accent:#2f6bd8; --accent-soft:#e8f0ff; --danger:#d9453d; --ok:#1f9d55; --warn:#c98a12;
+  --radius:12px; --shadow:0 10px 30px rgba(23,43,77,.08);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 "Microsoft YaHei","Segoe UI",system-ui,sans-serif}
+header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.92);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+header .bar{max-width:1180px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:14px}
+header h1{font-size:17px;margin:0;font-weight:600;letter-spacing:.3px;white-space:nowrap}
+header .sub{font-size:12px;color:var(--muted)}
+header .grow{flex:1}
+.token-wrap{display:flex;align-items:center;gap:6px}
+.token-wrap input{width:120px;padding:6px 10px;border:1px solid var(--line);border-radius:8px;font-size:12px}
+main{max-width:1180px;margin:0 auto;padding:18px 20px 60px}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tabs button{border:1px solid var(--line);background:#fff;padding:8px 16px;border-radius:999px;cursor:pointer;font-size:13px;color:var(--muted)}
+.tabs button.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.toolbar input[type=search]{flex:1;min-width:200px;padding:9px 14px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:13px}
+.btn{border:0;border-radius:10px;padding:9px 16px;font-size:13px;cursor:pointer;background:var(--accent);color:#fff;font-weight:600;white-space:nowrap}
+.btn.ghost{background:#fff;color:var(--text);border:1px solid var(--line);font-weight:500}
+.btn.danger{background:var(--danger)}
+.btn.small{padding:5px 10px;font-size:12px;border-radius:8px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.sw{display:flex;gap:12px;padding:14px;align-items:flex-start}
+.sw .icon{width:46px;height:46px;border-radius:10px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none;font-size:20px;color:var(--accent);font-weight:700}
+.sw .icon img{width:100%;height:100%;object-fit:cover}
+.iconpick{display:flex;gap:8px;align-items:center}
+.iconpick input{flex:1;min-width:0}
+.iconprev{width:38px;height:38px;border-radius:9px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none;font-size:13px;font-weight:700;color:var(--accent)}
+.iconprev img{width:100%;height:100%;object-fit:cover}
+.btn.small{padding:6px 10px;font-size:12px;white-space:nowrap}
+.sw .body{flex:1;min-width:0}
+.sw .name{font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.chip{font-size:11px;padding:2px 8px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:600}
+.chip.gray{background:#eef1f5;color:var(--muted)}
+.sw .meta{font-size:12px;color:var(--muted);margin-top:3px;word-break:break-all}
+.sw .actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.empty{padding:48px 20px;text-align:center;color:var(--muted)}
+.empty b{display:block;font-size:15px;color:var(--text);margin-bottom:6px}
+dialog{border:0;border-radius:16px;padding:0;width:min(640px,92vw);box-shadow:0 24px 70px rgba(20,35,60,.28)}
+dialog::backdrop{background:rgba(18,28,42,.42)}
+.dlg-head{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center}
+.dlg-head b{font-size:15px}
+.dlg-head .x{margin-left:auto;cursor:pointer;border:0;background:none;font-size:18px;color:var(--muted)}
+.dlg-body{padding:18px 20px;max-height:66vh;overflow:auto}
+.dlg-foot{padding:14px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end;background:#fafbfd;border-radius:0 0 16px 16px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
+.field input,.field textarea,.field select{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-size:13px;font-family:inherit;background:#fff}
+.field textarea{min-height:72px;resize:vertical}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hint{font-size:11px;color:var(--muted);margin-top:4px}
+.links{display:flex;flex-direction:column;gap:8px}
+.link-item{display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.link-item .info{flex:1;min-width:0}
+.link-item .info b{font-size:13px}
+.link-item .info div{font-size:11px;color:var(--muted);word-break:break-all}
+.pick{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:8px}
+.pick label{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:13px}
+.pick label:hover{background:#f5f8fd}
+.toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%);background:#1c2534;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;opacity:0;pointer-events:none;transition:.25s}
+.toast.show{opacity:1;bottom:44px}
+.toast.err{background:var(--danger)}
+.badge-ok{color:var(--ok);font-size:12px}
+.badge-bad{color:var(--danger);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div>
+      <h1>自建库后台</h1>
+      <div class="sub">项目档案与自有软件清单 · 数据保存在本机，软件里同源读取</div>
+    </div>
+    <div class="grow"></div>
+    <div class="token-wrap">
+      <span class="sub">口令</span>
+      <input id="tokenInput" placeholder="粘贴后台口令" autocomplete="off">
+      <button class="btn ghost small" onclick="saveToken()">保存</button>
+    </div>
+  </div>
+</header>
+<main>
+  <div class="tabs">
+    <button data-tab="software" class="on">软件清单 <span id="cntSw" class="chip gray">0</span></button>
+    <button data-tab="projects">项目档案 <span id="cntPj" class="chip gray">0</span></button>
+    <button data-tab="io">导入 / 导出</button>
+  </div>
+
+  <section id="tab-software">
+    <div class="toolbar">
+      <input type="search" id="qSw" placeholder="搜索软件名称 / 分类 / 备注">
+      <button class="btn" onclick="openSoftware(null)">+ 添加软件</button>
+    </div>
+    <div id="listSw" class="grid"></div>
+  </section>
+
+  <section id="tab-projects" style="display:none">
+    <div class="toolbar">
+      <input type="search" id="qPj" placeholder="搜索项目名称 / 标签 / 简介">
+      <button class="btn" onclick="openProject(null)">+ 添加项目</button>
+    </div>
+    <div id="listPj" class="grid"></div>
+  </section>
+
+  <section id="tab-io" style="display:none">
+    <div class="card" style="padding:18px">
+      <b>导出</b>
+      <p class="hint">把当前全部软件与项目导出成一个 JSON 文件，方便备份或换机迁移。</p>
+      <button class="btn ghost" onclick="exportData()">导出 JSON</button>
+      <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+      <b>导入</b>
+      <p class="hint">选择 JSON 文件后导入。合并 = 追加同名之外的新条目；覆盖 = 用文件内容替换整份库（请先导出备份）。</p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input type="file" id="importFile" accept=".json,application/json">
+        <label class="hint"><input type="radio" name="importMode" value="merge" checked> 合并</label>
+        <label class="hint"><input type="radio" name="importMode" value="replace"> 覆盖</label>
+        <button class="btn ghost" onclick="importData()">开始导入</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<!-- 软件编辑 -->
+<dialog id="dlgSw">
+  <div class="dlg-head"><b id="dlgSwTitle">添加软件</b><button class="x" onclick="dlgSw.close()">×</button></div>
+  <div class="dlg-body">
+    <input type="hidden" id="swId">
+    <div class="field"><label>软件名称 *</label><input id="swName" placeholder="例如 某某工具箱"></div>
+    <div class="row2">
+      <div class="field"><label>分类</label><input id="swCat" placeholder="例如 常用 / 音频 / 驱动"></div>
+      <div class="field"><label>版本</label><input id="swVer" placeholder="例如 2.3.1"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>体积</label><input id="swSize" placeholder="例如 36.5 MB"></div>
+      <div class="field"><label>图标</label>
+        <div class="iconpick">
+          <div class="iconprev" id="swIconPrev">?</div>
+          <input id="swIcon" placeholder="https://… 或 emoji">
+          <button type="button" class="btn ghost small" onclick="document.getElementById('swIconFile').click()">上传</button>
+        </div>
+        <input id="swIconFile" type="file" accept="image/*" hidden>
+        <div class="hint">可直接上传本地图片（自动压到 128px 存进自建库），也可填图片网址或 emoji。</div>
+      </div>
+    </div>
+    <div class="field"><label>所属项目（可多选）</label>
+      <div class="pick" id="swPick"></div>
+      <div class="hint">勾选后这款软件会出现在对应项目里；也可以到「项目档案」里勾选软件。不选则只留在软件清单。</div>
+    </div>
+    <div class="field"><label>下载直链</label><input id="swUrl" placeholder="https://…/setup.exe">
+      <div class="hint">留空表示只做记录；填了链接就能在软件里直接下载。</div>
+    </div>
+    <div class="field"><label>简介</label><textarea id="swIntro" placeholder="一句话说明这个软件干什么"></textarea></div>
+    <div class="field"><label>备注</label><textarea id="swNote" placeholder="授权、安装注意、账号等"></textarea></div>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn ghost" onclick="dlgSw.close()">取消</button>
+    <button class="btn" onclick="saveSoftware()">保存</button>
+  </div>
+</dialog>
+
+<!-- 项目编辑 -->
+<dialog id="dlgPj">
+  <div class="dlg-head"><b id="dlgPjTitle">添加项目</b><button class="x" onclick="dlgPj.close()">×</button></div>
+  <div class="dlg-body">
+    <input type="hidden" id="pjId">
+    <div class="field"><label>项目名称 *</label><input id="pjName" placeholder="例如 直播调音全套"></div>
+    <div class="row2">
+      <div class="field"><label>图标</label>
+        <div class="iconpick">
+          <div class="iconprev" id="pjIconPrev">?</div>
+          <input id="pjIcon" placeholder="https://… 或 emoji">
+          <button type="button" class="btn ghost small" onclick="document.getElementById('pjIconFile').click()">上传</button>
+        </div>
+        <input id="pjIconFile" type="file" accept="image/*" hidden>
+        <div class="hint">可直接上传本地图片（自动压到 128px 存进自建库），也可填图片网址或 emoji。</div>
+      </div>
+      <div class="field"><label>标签（逗号分隔）</label><input id="pjTags" placeholder="直播, 音频, 常用"></div>
+    </div>
+    <div class="field"><label>简介</label><textarea id="pjIntro" placeholder="这个项目是做什么的、适合谁"></textarea></div>
+    <div class="field"><label>备注</label><textarea id="pjNote" placeholder="部署步骤、注意事项"></textarea></div>
+
+    <div class="field"><label>包含的软件</label>
+      <div class="pick" id="pjPick"></div>
+      <div class="hint">勾选后会写回项目；没有想要的软件时，先去“软件清单”里添加。</div>
+    </div>
+
+    <div class="field"><label>附加链接</label>
+      <div class="links" id="pjLinks"></div>
+      <div class="links" style="margin-top:8px">
+        <div class="link-item">
+          <div class="info" style="display:grid;grid-template-columns:1fr 1.4fr;gap:6px">
+            <input id="lkName" placeholder="链接名称">
+            <input id="lkUrl" placeholder="https://…">
+          </div>
+          <button class="btn small ghost" onclick="addLink()">添加</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn ghost" onclick="dlgPj.close()">关闭</button>
+    <button class="btn" onclick="saveProject()">保存基本信息</button>
+  </div>
+</dialog>
+
+<script>
+const dlgSw = document.getElementById('dlgSw');
+const dlgPj = document.getElementById('dlgPj');
+let state = { software: [], projects: [] };
+let token = localStorage.getItem('xqAdminToken') || '';
+
+(function initToken(){
+  const q = new URLSearchParams(location.search).get('token');
+  if (q) { token = q; localStorage.setItem('xqAdminToken', q); }
+  document.getElementById('tokenInput').value = token;
+})();
+
+function saveToken(){
+  token = document.getElementById('tokenInput').value.trim();
+  localStorage.setItem('xqAdminToken', token);
+  load(); toast('口令已保存');
+}
+
+function toast(msg, isErr){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = 'toast', 2200);
+}
+
+async function api(path, method, body){
+  const options = { method: method || 'GET', headers: {} };
+  if (token) options.headers['X-Admin-Token'] = token;
+  if (body !== undefined){
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, options);
+  let data = null;
+  try { data = await res.json(); } catch(_) {}
+  if (!res.ok || (data && data.ok === false)){
+    throw new Error((data && data.error) || ('HTTP ' + res.status));
+  }
+  return data || {};
+}
+
+async function load(){
+  try{
+    const res = await api('/api/library');
+    state = res.data || { software: [], projects: [] };
+    state.software = state.software || [];
+    state.projects = state.projects || [];
+    renderAll();
+  }catch(err){
+    toast('读取失败：' + err.message, true);
+  }
+}
+
+function esc(text){
+  return String(text == null ? '' : text).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function iconHtml(item){
+  const icon = String(item.icon || '').trim();
+  if (/^(https?:\/\/|data:image\/)/i.test(icon)) return '<div class="icon"><img src="' + esc(icon) + '" onerror="this.remove()"></div>';
+  const letter = icon ? icon.slice(0, 2) : (item.name || '?').slice(0, 1);
+  return '<div class="icon">' + esc(letter) + '</div>';
+}
+
+/* --------- 图标：本地图片上传（压缩成 data URI 存进自建库） --------- */
+function shrinkIcon(file, size){
+  size = size || 128;
+  return new Promise((resolve, reject) => {
+    if (!file || !/^image\//.test(file.type || '')) return reject(new Error('请选择图片文件'));
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try{
+        const side = Math.min(img.naturalWidth || img.width, img.naturalHeight || img.height) || size;
+        const sx = ((img.naturalWidth || side) - side) / 2;
+        const sy = ((img.naturalHeight || side) - side) / 2;
+        const canvas = document.createElement('canvas');
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+        let data = canvas.toDataURL('image/png');
+        if (data.length > 70000) data = canvas.toDataURL('image/jpeg', 0.85);
+        URL.revokeObjectURL(url);
+        resolve(data);
+      }catch(err){ URL.revokeObjectURL(url); reject(err); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片无法解析')); };
+    img.src = url;
+  });
+}
+
+function refreshIconPreview(inputId, prevId){
+  const box = document.getElementById(prevId);
+  if (!box) return;
+  const value = String(document.getElementById(inputId).value || '').trim();
+  if (/^(https?:\/\/|data:image\/)/i.test(value)) {
+    box.innerHTML = '<img src="' + esc(value) + '" onerror="this.remove()">';
+  } else {
+    box.textContent = value ? value.slice(0, 2) : '?';
+  }
+}
+
+function bindIconPicker(fileId, inputId, prevId){
+  const fileEl = document.getElementById(fileId);
+  const inputEl = document.getElementById(inputId);
+  if (!fileEl || !inputEl) return;
+  inputEl.addEventListener('input', () => refreshIconPreview(inputId, prevId));
+  fileEl.addEventListener('change', async () => {
+    const file = fileEl.files && fileEl.files[0];
+    fileEl.value = '';
+    if (!file) return;
+    try{
+      const data = await shrinkIcon(file);
+      inputEl.value = data;
+      refreshIconPreview(inputId, prevId);
+      toast('图标已载入（' + Math.round(data.length / 1024) + ' KB），保存后生效');
+    }catch(err){ toast('读取图片失败：' + err.message, true); }
+  });
+  refreshIconPreview(inputId, prevId);
+}
+
+function renderAll(){
+  renderSoftware();
+  renderProjects();
+  document.getElementById('cntSw').textContent = state.software.length;
+  document.getElementById('cntPj').textContent = state.projects.length;
+}
+
+function renderSoftware(){
+  const q = (document.getElementById('qSw').value || '').toLowerCase();
+  const list = state.software.filter(s => !q || [s.name, s.category, s.intro, s.note, s.version].join(' ').toLowerCase().includes(q));
+  const box = document.getElementById('listSw');
+  if (!list.length){
+    box.className = '';
+    box.innerHTML = '<div class="card empty"><b>' + (state.software.length ? '没有匹配的软件' : '还没有添加软件') +
+      '</b>' + (state.software.length ? '换个关键词试试。' : '点右上角「+ 添加软件」开始建自己的清单。') + '</div>';
+    return;
+  }
+  box.className = 'grid';
+  box.innerHTML = list.map(s => `
+    <div class="card sw">
+      ${iconHtml(s)}
+      <div class="body">
+        <div class="name">${esc(s.name)} <span class="chip gray">${esc(s.category || '未分类')}</span>${s.version ? '<span class="chip gray">v' + esc(s.version) + '</span>' : ''}</div>
+        <div class="meta">${s.size ? esc(s.size) + ' · ' : ''}${s.url ? '有下载直链' : '仅记录，无直链'}</div>
+        ${s.intro ? '<div class="meta">' + esc(s.intro) + '</div>' : ''}
+        <div class="actions">
+          <button class="btn small ghost" onclick="openSoftware('${s.id}')">编辑</button>
+          <button class="btn small ghost" onclick="probeSoftware('${s.id}', this)">测链接</button>
+          ${s.url ? '<button class="btn small ghost" data-open="' + esc(s.url) + '">打开链接</button>' : ''}
+          <button class="btn small danger" onclick="removeSoftware('${s.id}')">删除</button>
+        </div>
+      </div>
+    </div>`).join('');
+  bindOpenButtons(box);
+}
+
+function bindOpenButtons(box){
+  (box || document).querySelectorAll('[data-open]').forEach(btn => {
+    btn.onclick = function () { window.open(btn.getAttribute('data-open'), '_blank'); };
+  });
+}
+
+function renderProjects(){
+  const q = (document.getElementById('qPj').value || '').toLowerCase();
+  const list = state.projects.filter(p => !q || [p.name, (p.tags || []).join(' '), p.intro, p.note].join(' ').toLowerCase().includes(q));
+  const box = document.getElementById('listPj');
+  if (!list.length){
+    box.className = '';
+    box.innerHTML = '<div class="card empty"><b>' + (state.projects.length ? '没有匹配的项目' : '还没有项目档案') +
+      '</b>' + (state.projects.length ? '换个关键词试试。' : '一个项目可以装若干软件和链接，点「+ 添加项目」开始。') + '</div>';
+    return;
+  }
+  box.className = 'grid';
+  box.innerHTML = list.map(p => {
+    const swCount = (p.softwareIds || []).filter(id => state.software.some(s => s.id === id)).length;
+    return `
+    <div class="card sw">
+      ${iconHtml(p)}
+      <div class="body">
+        <div class="name">${esc(p.name)} <span class="chip gray">${swCount} 个软件</span><span class="chip gray">${(p.links || []).length} 条链接</span></div>
+        ${(p.tags || []).length ? '<div class="meta">' + (p.tags || []).map(t => '#' + esc(t)).join(' ') + '</div>' : ''}
+        ${p.intro ? '<div class="meta">' + esc(p.intro) + '</div>' : ''}
+        <div class="actions">
+          <button class="btn small ghost" onclick="openProject('${p.id}')">编辑</button>
+          <button class="btn small danger" onclick="removeProject('${p.id}')">删除</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ---------------- 软件 ---------------- */
+function renderSwPick(softwareId){
+  const box = document.getElementById('swPick');
+  if (!box) return;
+  if (!state.projects.length){
+    box.innerHTML = '<div class="hint">还没有项目档案，先到「项目档案」里添加项目。</div>';
+    return;
+  }
+  box.innerHTML = state.projects.map(p => {
+    const on = softwareId && (p.softwareIds || []).includes(softwareId);
+    return `<label><input type="checkbox" value="${esc(p.id)}" ${on ? 'checked' : ''}>
+      <span>${esc(p.name)}</span><span class="hint">${(p.softwareIds || []).length} 个软件</span></label>`;
+  }).join('');
+}
+
+function openSoftware(id){
+  const s = state.software.find(x => x.id === id) || { id: '', name: '', category: '', version: '', size: '', icon: '', url: '', intro: '', note: '' };
+  document.getElementById('dlgSwTitle').textContent = id ? '编辑软件' : '添加软件';
+  document.getElementById('swId').value = id || '';
+  document.getElementById('swName').value = s.name || '';
+  document.getElementById('swCat').value = s.category === '未分类' ? '' : (s.category || '');
+  document.getElementById('swVer').value = s.version || '';
+  document.getElementById('swSize').value = s.size || '';
+  document.getElementById('swIcon').value = s.icon || '';
+  document.getElementById('swUrl').value = s.url || '';
+  document.getElementById('swIntro').value = s.intro || '';
+  document.getElementById('swNote').value = s.note || '';
+  refreshIconPreview('swIcon', 'swIconPrev');
+  renderSwPick(id || '');
+  dlgSw.showModal();
+}
+
+async function saveSoftware(){
+  const id = document.getElementById('swId').value;
+  const picked = Array.from(document.querySelectorAll('#swPick input[type=checkbox]'))
+    .filter(el => el.checked).map(el => el.value);
+  const payload = {
+    name: document.getElementById('swName').value.trim(),
+    category: document.getElementById('swCat').value.trim(),
+    version: document.getElementById('swVer').value.trim(),
+    size: document.getElementById('swSize').value.trim(),
+    icon: document.getElementById('swIcon').value.trim(),
+    url: document.getElementById('swUrl').value.trim(),
+    intro: document.getElementById('swIntro').value.trim(),
+    note: document.getElementById('swNote').value.trim()
+  };
+  if (!payload.name) return toast('软件名称必填', true);
+  try{
+    let sid = id;
+    if (id) await api('/api/software/' + id, 'PUT', payload);
+    else {
+      const res = await api('/api/software', 'POST', payload);
+      sid = res && res.data ? res.data.id : '';
+    }
+    if (sid){
+      for (const p of state.projects){
+        const has = (p.softwareIds || []).includes(sid);
+        const want = picked.includes(p.id);
+        if (want && !has) await api('/api/projects/' + p.id + '/software', 'POST', { softwareId: sid });
+        else if (!want && has) await api('/api/projects/' + p.id + '/software/' + sid, 'DELETE');
+      }
+    }
+    dlgSw.close();
+    await load();
+    toast(id ? '已保存修改' : '已添加软件');
+  }catch(err){ toast(err.message, true); }
+}
+
+async function removeSoftware(id){
+  const s = state.software.find(x => x.id === id);
+  if (!confirm('删除「' + (s ? s.name : '该软件') + '」？相关项目里的引用也会一并移除。')) return;
+  try{ await api('/api/software/' + id, 'DELETE'); await load(); toast('已删除'); }
+  catch(err){ toast(err.message, true); }
+}
+
+async function probeSoftware(id, btn){
+  btn.disabled = true; btn.textContent = '探测中…';
+  try{
+    const res = await api('/api/software/' + id + '/probe', 'POST', {});
+    if (res.ok && res.data) toast('链接可用 · ' + (res.data.size || '体积未知') + ' · ' + (res.data.contentType || ''));
+    else toast((res.error || '链接不可用'), true);
+  }catch(err){ toast('探测失败：' + err.message, true); }
+  btn.disabled = false; btn.textContent = '测链接';
+}
+
+/* ---------------- 项目 ---------------- */
+function openProject(id){
+  const p = state.projects.find(x => x.id === id) || { id: '', name: '', icon: '', intro: '', note: '', tags: [], softwareIds: [], links: [] };
+  document.getElementById('dlgPjTitle').textContent = id ? '编辑项目' : '添加项目';
+  document.getElementById('pjId').value = id || '';
+  document.getElementById('pjName').value = p.name || '';
+  document.getElementById('pjIcon').value = p.icon || '';
+  document.getElementById('pjTags').value = (p.tags || []).join(', ');
+  document.getElementById('pjIntro').value = p.intro || '';
+  document.getElementById('pjNote').value = p.note || '';
+  refreshIconPreview('pjIcon', 'pjIconPrev');
+  renderPick(id, p);
+  renderLinks(p);
+  dlgPj.showModal();
+}
+
+function renderPick(pid, project){
+  const box = document.getElementById('pjPick');
+  if (!state.software.length){
+    box.innerHTML = '<div class="hint">还没有软件，先去「软件清单」添加。</div>';
+    return;
+  }
+  const selected = new Set(project.softwareIds || []);
+  box.innerHTML = state.software.map(s => `
+    <label><input type="checkbox" ${selected.has(s.id) ? 'checked' : ''} ${pid ? '' : 'disabled'}
+      onchange="toggleAttach('${pid}', '${s.id}', this.checked)">
+      <span>${esc(s.name)}</span><span class="hint">${esc(s.category || '')}</span></label>`).join('');
+}
+
+async function toggleAttach(pid, sid, on){
+  if (!pid) return;
+  try{
+    if (on) await api('/api/projects/' + pid + '/software', 'POST', { softwareId: sid });
+    else await api('/api/projects/' + pid + '/software/' + sid, 'DELETE');
+    await load();
+    const project = state.projects.find(p => p.id === pid);
+    if (project) { renderPick(pid, project); }
+  }catch(err){ toast(err.message, true); }
+}
+
+function renderLinks(project){
+  const box = document.getElementById('pjLinks');
+  const links = project.links || [];
+  box.innerHTML = links.length ? links.map(l => `
+    <div class="link-item">
+      <div class="info"><b>${esc(l.name)}</b><div>${esc(l.url || '（无地址）')}</div></div>
+      ${l.url ? '<button class="btn small ghost" data-open="' + esc(l.url) + '">打开</button>' : ''}
+      <button class="btn small danger" onclick="removeLink('${project.id}', '${l.id}')">删除</button>
+    </div>`).join('') : '<div class="hint">还没有附加链接。</div>';
+  bindOpenButtons(box);
+}
+
+async function addLink(){
+  const pid = document.getElementById('pjId').value;
+  const name = document.getElementById('lkName').value.trim();
+  const url = document.getElementById('lkUrl').value.trim();
+  if (!pid) return toast('先保存项目，再添加链接', true);
+  if (!name) return toast('链接名称必填', true);
+  try{
+    await api('/api/projects/' + pid + '/links', 'POST', { name, url });
+    document.getElementById('lkName').value = '';
+    document.getElementById('lkUrl').value = '';
+    await load();
+    const project = state.projects.find(p => p.id === pid);
+    if (project) renderLinks(project);
+    toast('已添加链接');
+  }catch(err){ toast(err.message, true); }
+}
+
+async function removeLink(pid, lid){
+  try{ await api('/api/projects/' + pid + '/links/' + lid, 'DELETE'); await load();
+    const project = state.projects.find(p => p.id === pid); if (project) renderLinks(project);
+    toast('已删除链接');
+  }catch(err){ toast(err.message, true); }
+}
+
+async function saveProject(){
+  const id = document.getElementById('pjId').value;
+  const payload = {
+    name: document.getElementById('pjName').value.trim(),
+    icon: document.getElementById('pjIcon').value.trim(),
+    tags: document.getElementById('pjTags').value.trim(),
+    intro: document.getElementById('pjIntro').value.trim(),
+    note: document.getElementById('pjNote').value.trim()
+  };
+  if (!payload.name) return toast('项目名称必填', true);
+  try{
+    if (id){ await api('/api/projects/' + id, 'PUT', payload); }
+    else {
+      const res = await api('/api/projects', 'POST', payload);
+      document.getElementById('pjId').value = res.data.id;
+    }
+    await load();
+    const pid = document.getElementById('pjId').value;
+    const project = state.projects.find(p => p.id === pid);
+    if (project) { renderPick(pid, project); renderLinks(project); }
+    toast('已保存项目');
+  }catch(err){ toast(err.message, true); }
+}
+
+async function removeProject(id){
+  const p = state.projects.find(x => x.id === id);
+  if (!confirm('删除项目「' + (p ? p.name : '') + '」？软件本身不会被删除。')) return;
+  try{ await api('/api/projects/' + id, 'DELETE'); await load(); toast('已删除项目'); }
+  catch(err){ toast(err.message, true); }
+}
+
+/* ---------------- 导入导出 ---------------- */
+function exportData(){
+  if (!token) return toast('先填入口令', true);
+  const a = document.createElement('a');
+  a.href = '/api/export?token=' + encodeURIComponent(token);
+  a.download = '自建库-' + new Date().toISOString().slice(0, 10) + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+async function importData(){
+  const file = document.getElementById('importFile').files[0];
+  if (!file) return toast('先选择 JSON 文件', true);
+  const mode = (document.querySelector('input[name=importMode]:checked') || {}).value || 'merge';
+  try{
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const res = await api('/api/import', 'POST', { mode, data: parsed });
+    await load();
+    toast('导入完成：软件 ' + res.data.software + ' 条，项目 ' + res.data.projects + ' 个');
+  }catch(err){ toast('导入失败：' + err.message, true); }
+}
+
+/* ---------------- 交互 ---------------- */
+document.querySelectorAll('.tabs button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    ['software','projects','io'].forEach(tab => {
+      document.getElementById('tab-' + tab).style.display = (btn.dataset.tab === tab ? '' : 'none');
+    });
+  };
+});
+document.getElementById('qSw').oninput = renderSoftware;
+document.getElementById('qPj').oninput = renderProjects;
+bindIconPicker('swIconFile', 'swIcon', 'swIconPrev');
+bindIconPicker('pjIconFile', 'pjIcon', 'pjIconPrev');
+
+load();
+</script>
+</body>
+</html>

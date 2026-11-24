@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build exe
+        shell: pwsh
+        run: |
+          $params = @(
+            '-m','PyInstaller','--noconfirm','--clean','--onefile','--noconsole',
+            '--name','XQToolbox',
+            '--icon','app\app.ico',
+            '--add-data','app\ui;ui',
+            '--add-data','admin;admin',
+            '--collect-data','pywebview',
+            '--hidden-import','clr',
+            '--hidden-import','pythonnet',
+            '--hidden-import','clr_loader',
+            '--hidden-import','webview.platforms.edgechromium',
+            '--hidden-import','pycaw',
+            '--hidden-import','comtypes',
+            '--hidden-import','app.native.audio_format',
+            '--hidden-import','app.native.local_auth',
+            '--hidden-import','app.native.lestore',
+            '--hidden-import','app.native.library',
+            '--hidden-import','app.native.maintenance',
+            '--hidden-import','app.native.update',
+            'app\main.py'
+          )
+          python @params
+          Get-ChildItem dist | Select-Object Name,Length | Format-Table -AutoSize | Out-String
+          if (-not (Test-Path 'dist\XQToolbox.exe')) { throw '打包产物缺失：dist\XQToolbox.exe' }
+
+      - name: Check tag matches APP_VERSION
+        shell: pwsh
+        run: |
+          $line = Select-String -Path 'app\native\update.py' -Pattern 'APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
+          if (-not $line) { throw '未找到 APP_VERSION' }
+          $appVer = $line.Matches.Groups[1].Value
+          $tagVer = $env:GITHUB_REF_NAME -replace '^v',''
+          Write-Host "APP_VERSION=$appVer tag=$tagVer"
+          if ($appVer -ne $tagVer) { throw "版本不一致：tag 是 v$tagVer，程序内是 $appVer。请先改 APP_VERSION 再打 tag。" }
+
+      - name: Make manifest
+        shell: pwsh
+        run: |
+          $tagVer = $env:GITHUB_REF_NAME -replace '^v',''
+          $exePath = Join-Path $PWD 'dist\XQToolbox.exe'
+          $sha = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLower()
+          $obj = [ordered]@{
+            version = $tagVer
+            file    = 'XQToolbox.exe'
+            sha256  = $sha
+            notes   = "v$tagVer 自动构建发布"
+          }
+          $json = $obj | ConvertTo-Json
+          $outPath = Join-Path $PWD 'dist\version.json'
+          [System.IO.File]::WriteAllText($outPath, $json, (New-Object System.Text.UTF8Encoding($false)))
+          Get-Content -LiteralPath $outPath -Encoding utf8 | Out-String
+          if (-not (Test-Path $outPath)) { throw '清单生成失败' }
+
+      - name: Create release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" "dist/XQToolbox.exe" "dist/version.json" `
+            --repo "$env:GITHUB_REPOSITORY" `
+            --title "小庆工具箱 $env:GITHUB_REF_NAME" `
+            --notes "v$($env:GITHUB_REF_NAME -replace '^v','') 自动构建发布"
