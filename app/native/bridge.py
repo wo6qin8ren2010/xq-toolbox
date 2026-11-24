@@ -19,6 +19,7 @@ from .downloads import Downloader
 from .paths import log
 
 MAX_WORKERS = 8
+_T_IMPORT = time.perf_counter()
 
 
 def is_admin() -> bool:
@@ -38,6 +39,7 @@ class Bridge:
         self._overview_lock = threading.Lock()
         self._started = False
         self._lock_announced = False
+        self._first_cmd = False
 
     def attach(self, window) -> None:
         self.window = window
@@ -71,6 +73,9 @@ class Bridge:
     # ------------------------------------------------------------------
     def post_message(self, raw: str) -> str:
         try:
+            if not self._first_cmd:
+                self._first_cmd = True
+                log("启动", "前端首次通信：距原生就绪 %.0f ms" % ((time.perf_counter() - _T_IMPORT) * 1000))
             raw = str(raw or "")
             command, sep, rest = raw.partition("|")
             command = command.strip()

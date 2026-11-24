@@ -9,7 +9,10 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
+import time
 import traceback
+
+_T0 = time.perf_counter()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
@@ -22,6 +25,9 @@ from native import local_auth  # noqa: E402
 from native import seed  # noqa: E402
 from native.paths import log, ui_dir  # noqa: E402
 from native.push import PushBus  # noqa: E402
+from native import sysinfo  # noqa: E402
+
+_T_IMPORT = time.perf_counter()
 
 
 def _dpi_aware() -> None:
@@ -67,6 +73,8 @@ def main() -> None:
     _dpi_aware()
     local_auth.ensure_default()
     seed.ensure_seed()
+    # 系统信息后台采集先跑起来，首屏就有真实数值，不用等子进程
+    sysinfo.prime()
     bus = PushBus()
     bridge = Bridge(bus)
 
@@ -84,6 +92,8 @@ def main() -> None:
     bus.attach(window)
     bridge.attach(window)
     log("启动", "小庆工具箱 已启动")
+    log("启动", "启动耗时：解包+导入 %.0f ms，初始化+建窗 %.0f ms" % (
+        (_T_IMPORT - _T0) * 1000, (time.perf_counter() - _T_IMPORT) * 1000))
     debug = os.environ.get("MIXER_DEBUG") == "1"
     try:
         webview.start(debug=debug)

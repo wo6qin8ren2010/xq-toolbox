@@ -35,6 +35,8 @@ jobs:
             '--add-data','app\seed;seed',
             '--add-data','admin;admin',
             '--collect-data','pywebview',
+            '--exclude-module','setuptools',
+            '--exclude-module','pkg_resources',
             '--hidden-import','clr',
             '--hidden-import','pythonnet',
             '--hidden-import','clr_loader',

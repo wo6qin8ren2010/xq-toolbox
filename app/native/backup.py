@@ -178,8 +178,3 @@ def delete_effects(snapshot_ids: list) -> str:
         except Exception:
             failed += 1
     return "delete_backup_effect_result|success|deleted=%d|failed=%d" % (deleted, failed)
-
-
-def backup_exists() -> str:
-    """原版会检测酷狗/QQ音乐/网易云/TT语音的配置备份，本程序统一返回未备份。"""
-    return "backup_exists_result|kugou=0|qqmusic=0|netease=0|tt=0"

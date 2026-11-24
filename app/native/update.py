@@ -19,7 +19,7 @@ import urllib.request
 from .library import DATA_DIR
 from .paths import log
 
-APP_VERSION = "1.0.18"
+APP_VERSION = "1.0.19"
 DEFAULT_BASE = "https://github.com/wo6qin8ren2010/xq-toolbox/releases/latest/download"
 CFG_FILE = os.path.join(DATA_DIR, "更新设置.json")
 DL_DIR = os.path.join(DATA_DIR, "更新下载")
@@ -79,6 +79,86 @@ def _get_retry(url: str, timeout: float, tries: int = 2):
     raise last
 
 
+# GitHub 直链在国内多数网络下不可达（连接超时），只靠单点等于更新功能对别人失效。
+# 这些镜像把原始直链整段拼在前缀后面即可；下载包一律 SHA256 校验，
+# 镜像即使返回坏包也进不了程序，所以加镜像不降低安全性。
+MIRRORS = (
+    "",
+    "https://gh-proxy.com/",
+    "https://ghfast.top/",
+    "https://ghproxy.net/",
+)
+MIRROR_FILE = os.path.join(DATA_DIR, "更新镜像.json")
+_mirror_lock = threading.Lock()
+_good_mirror = None
+
+
+def _load_mirror() -> str:
+    try:
+        with open(MIRROR_FILE, "r", encoding="utf-8") as fh:
+            return str(json.load(fh).get("prefix", "") or "")
+    except Exception:
+        return ""
+
+
+def _remember_mirror(prefix: str) -> None:
+    """记住上次通了的线路，下次启动直接从它开始，不再白等直连超时。"""
+    global _good_mirror
+    with _mirror_lock:
+        if _good_mirror == prefix:
+            return
+        _good_mirror = prefix
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(MIRROR_FILE, "w", encoding="utf-8") as fh:
+            json.dump({"prefix": prefix}, fh, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _mirrorable(url: str) -> bool:
+    host = urllib.parse.urlsplit(url).netloc.lower()
+    return host.endswith("github.com") or host.endswith("githubusercontent.com")
+
+
+def _candidates(url: str) -> list:
+    """自建网盘等自定义源原样使用，只有 GitHub 地址才套镜像。"""
+    if not _mirrorable(url):
+        return [url]
+    order = list(MIRRORS)
+    with _mirror_lock:
+        fav = _good_mirror
+    if fav is None:
+        fav = _load_mirror()
+    if fav in order:
+        order.remove(fav)
+        order.insert(0, fav)
+    return [(p + url) if p else url for p in order]
+
+
+def _open_multi(url: str, timeout: float, tries: int = 1):
+    """按 直连 → 镜像 依次尝试，谁先通用谁，并记住这条线路。"""
+    urls = _candidates(url)
+    last = None
+    for candidate in urls:
+        for idx in range(max(1, tries)):
+            try:
+                resp = _get(candidate, timeout)
+            except Exception as exc:
+                last = exc
+                if idx + 1 < tries:
+                    time.sleep(1.0)
+                continue
+            prefix = candidate[: len(candidate) - len(url)] if candidate.endswith(url) else ""
+            _remember_mirror(prefix)
+            if prefix:
+                log("自动更新", "改走镜像线路：%s" % prefix, "信息")
+            return resp
+    if len(urls) > 1:
+        raise ValueError("直连与 %d 个镜像均不可达（最后错误：%s）" % (len(urls) - 1, last))
+    raise last if last is not None else ValueError("连接失败")
+
+
 def check(base: str) -> dict:
     """拉 version.json 比对版本；返回 status=latest/available/nobase/error。"""
     base = str(base or "").strip()
@@ -88,7 +168,8 @@ def check(base: str) -> dict:
         return {"status": "error", "msg": "更新源地址需以 http:// 或 https:// 开头"}
     url = base.rstrip("/") + "/version.json"
     try:
-        with _get_retry(url, 25, 2) as resp:
+        # 直连给 6 秒就够判断通不通；自定义源不是 GitHub，保留原来的两次重试
+        with _open_multi(url, 6 if _mirrorable(url) else 25, 1 if _mirrorable(url) else 2) as resp:
             manifest = json.loads(resp.read().decode("utf-8-sig"))
     except Exception as exc:
         log("自动更新", "拉取版本清单失败：%s" % exc, "警告")
@@ -145,7 +226,7 @@ def download_and_verify(url: str, sha256: str) -> str:
             size = 0
             started = time.time()
             try:
-                with _get(url, 120) as resp, open(part, "wb") as fh:
+                with _open_multi(url, 30) as resp, open(part, "wb") as fh:
                     while True:
                         chunk = resp.read(262144)
                         if not chunk:

@@ -1,6 +1,6 @@
 # 小庆工具箱
 
-**版本：v1.0.18（2026-11-25）**
+**版本：v1.0.19（2026-11-25）**
 
 一个 Windows 桌面工具箱：系统监控、软件下载、日常维护、音频调试与自建资料库，单文件绿色运行。
 
@@ -35,6 +35,14 @@ https://github.com/wo6qin8ren2010/xq-toolbox/releases/latest/download
 
 检查更新会读取该地址下的 `version.json`，比对版本、下载 `XQToolbox.exe` 并校验 SHA256；开启静默更新后，退出程序时自动替换并自动重启新版。新用户首次运行已自动填好该地址，无需手动配置。
 
+国内网络直连 GitHub 常常超时。v1.0.19 起会自动在直连与镜像线路之间回退，并记住通的线路，无需手动配置；下载包一律 SHA256 校验，对不上就丢弃。
+
+v1.0.18 及更早版本没有自动回退，不用换程序，把更新源改成下面这个地址即可正常更新：
+
+```
+https://gh-proxy.com/https://github.com/wo6qin8ren2010/xq-toolbox/releases/latest/download
+```
+
 ## 目录结构
 
 ```
@@ -47,6 +55,10 @@ https://github.com/wo6qin8ren2010/xq-toolbox/releases/latest/download
 ```
 
 ## 版本记录
+
+### v1.0.19 — 2026-11-25
+
+- 优化
 
 ### v1.0.18 — 2026-11-25
 

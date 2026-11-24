@@ -41,14 +41,3 @@ def _load(kind: str) -> str:
 
 def message(kind: str) -> str:
     return PREFIX.get(kind, "cloud_data_cache|") + _load(kind)
-
-
-def cache_file(kind: str) -> str:
-    name = CACHE_FILES.get(kind)
-    if not name:
-        return ""
-    our = os.path.join(paths.data_dir(), name)
-    if os.path.isfile(our):
-        return our
-    original = os.path.join(paths.original_data_dir(), name)
-    return original if os.path.isfile(original) else ""

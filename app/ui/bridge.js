@@ -717,6 +717,7 @@
 
   function postToPython(message) {
     try {
+      wakePoll();
       window.pywebview.api.post_message(message);
     } catch (e) {
       queue.push(message);
@@ -771,22 +772,52 @@
   }
 
   // 拉取原生队列（不使用 evaluate_js，避免跨线程调用界面线程）
-  var pollTimer = setInterval(function () {
-    if (!apiReady() || typeof window.pywebview.api.poll !== 'function') return;
+  // 自适应节奏：有消息或刚发过命令时 70ms 快轮询；持续空闲降到 240ms，省掉无谓的 IPC
+  var POLL_FAST = 70, POLL_IDLE = 240, POLL_IDLE_AFTER = 20;
+  var pollDelay = POLL_FAST, pollIdle = 0, pollTimer = 0;
+
+  function wakePoll() {
+    pollIdle = 0;
+    if (pollDelay !== POLL_FAST) {
+      pollDelay = POLL_FAST;
+      if (pollTimer) { clearTimeout(pollTimer); pollTimer = setTimeout(pollTick, POLL_FAST); }
+    }
+  }
+
+  function pollTick() {
+    pollTimer = 0;
+    if (!apiReady() || typeof window.pywebview.api.poll !== 'function') {
+      pollTimer = setTimeout(pollTick, POLL_FAST);
+      return;
+    }
     askLockState();
+    var settled = false, guard = 0;
+    function settle(count) {
+      if (settled) return;
+      settled = true;
+      if (guard) { clearTimeout(guard); guard = 0; }
+      if (count > 0) { pollIdle = 0; pollDelay = POLL_FAST; }
+      else if (++pollIdle >= POLL_IDLE_AFTER) { pollDelay = POLL_IDLE; }
+      pollTimer = setTimeout(pollTick, pollDelay);
+    }
+    // 兜底：万一某次 poll 的 promise 不落地，也要让轮询继续转
+    guard = setTimeout(function () { settle(0); }, 1000);
     try {
       var pending = window.pywebview.api.poll(40);
       if (pending && typeof pending.then === 'function') {
         pending.then(function (items) {
           if (items && items.length) { items.forEach(dispatch); }
-        });
-      } else if (pending && pending.length) {
-        pending.forEach(dispatch);
+          settle(items ? items.length : 0);
+        }, function () { settle(0); });
+      } else {
+        if (pending && pending.length) { pending.forEach(dispatch); }
+        settle(pending ? pending.length : 0);
       }
-    } catch (e) { /* ignore */ }
-  }, 70);
+    } catch (e) { settle(0); }
+  }
+  pollTimer = setTimeout(pollTick, POLL_FAST);
 
-  window.addEventListener('pywebviewready', function () { flush(); askLockState(); });
+  window.addEventListener('pywebviewready', function () { flush(); askLockState(); wakePoll(); });
   document.addEventListener('DOMContentLoaded', flush);
 
   // 侧栏由页面自己渲染，这里轮询保证「小庆自用」始终紧跟在「软件下载」后面

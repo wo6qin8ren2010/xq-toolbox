@@ -1,4 +1,10 @@
-"""系统概述：CPU / 内存 / 磁盘 / 显卡 / 温度 / 系统信息采集。"""
+"""系统概述：CPU / 内存 / 磁盘 / 显卡 / 温度 / 系统信息采集。
+
+采集分两类：
+- 内存级读取（psutil、注册表）在请求线程里直接做，微秒级；
+- 需要拉起子进程的（nvidia-smi、ACPI 测温）一律放后台线程，
+  结果写缓存。请求路径永不等待子进程，也绝不持锁做 I/O。
+"""
 from __future__ import annotations
 
 import json
@@ -10,8 +16,16 @@ import time
 
 import psutil
 
-_cache = {"at": 0.0, "gpu": (0.0, 0.0, 0.0, ""), "disk": (0.0, 0.0), "tempAt": 0.0, "cpuTemp": None}
+_GPU_EVERY = 1.5
+_TEMP_EVERY = 15.0
+_IDLE_AFTER = 6.0
+
+_cache = {"gpu": (0.0, 0.0, 0.0, ""), "cpuTemp": None}
 _lock = threading.Lock()
+_static = {}
+_worker = None
+_worker_lock = threading.Lock()
+_last_want = 0.0
 
 
 def _reg_value(path: str, name: str) -> str:
@@ -39,6 +53,14 @@ def _processor_name() -> str:
     name = _reg_value(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString")
     name = (name or platform.processor() or "未知处理器").strip()
     return " ".join(name.split())
+
+
+def _static_info() -> tuple:
+    """机器型号信息运行期不会变，只读一次注册表。"""
+    if not _static:
+        _static["os"] = _os_name()
+        _static["processor"] = _processor_name()
+    return _static["os"], _static["processor"]
 
 
 def _nvidia() -> tuple:
@@ -86,23 +108,54 @@ def _acpi_cpu_temp() -> float | None:
         return None
 
 
+def _loop() -> None:
+    last_temp = 0.0
+    while True:
+        # 没人看的时候不拉子进程：界面切走或最小化后自动停采，回来 1 秒内补上
+        if time.time() - _last_want > _IDLE_AFTER:
+            time.sleep(1.0)
+            continue
+        gpu = _nvidia()
+        with _lock:
+            _cache["gpu"] = gpu
+        now = time.time()
+        if now - last_temp >= _TEMP_EVERY:
+            temp = _acpi_cpu_temp()
+            with _lock:
+                _cache["cpuTemp"] = temp
+            last_temp = time.time()
+        time.sleep(_GPU_EVERY)
+
+
+def prime() -> None:
+    """启动时调用： warm 静态信息与 CPU 采样，并拉起后台采集线程。"""
+    global _worker, _last_want
+    with _worker_lock:
+        if _worker is not None:
+            return
+        _last_want = time.time()
+        _static_info()
+        try:
+            psutil.cpu_percent(interval=None)
+        except Exception:
+            pass
+        _worker = threading.Thread(target=_loop, name="sysinfo", daemon=True)
+        _worker.start()
+
+
 def snapshot() -> dict:
-    now = time.time()
+    """只读缓存 + 内存级采样，任何情况下都不阻塞在子进程上。"""
+    global _last_want
+    _last_want = time.time()
+    prime()
     with _lock:
-        if now - _cache["at"] > 1.5:
-            _cache["gpu"] = _nvidia()
-            try:
-                disk = psutil.disk_usage(os.environ.get("SystemDrive", "C:") + "\\")
-                _cache["disk"] = (disk.percent, disk.total / (1024 ** 3))
-            except Exception:
-                _cache["disk"] = (0.0, 0.0)
-            _cache["at"] = now
-        if now - _cache["tempAt"] > 15:
-            _cache["cpuTemp"] = _acpi_cpu_temp()
-            _cache["tempAt"] = now
         gpu_util, gpu_mem, gpu_temp, gpu_name = _cache["gpu"]
         cpu_temp = _cache["cpuTemp"]
-        disk_pct, _disk_total = _cache["disk"]
+
+    try:
+        disk_pct = psutil.disk_usage(os.environ.get("SystemDrive", "C:") + "\\").percent
+    except Exception:
+        disk_pct = 0.0
 
     vm = psutil.virtual_memory()
     try:
@@ -111,6 +164,7 @@ def snapshot() -> dict:
     except Exception:
         cpu_freq_mhz = 0.0
 
+    os_name, processor = _static_info()
     return {
         "cpu": psutil.cpu_percent(interval=None),
         "ram": vm.percent,
@@ -119,8 +173,8 @@ def snapshot() -> dict:
         "gpuMemory": gpu_mem,
         "cpuTemp": cpu_temp,
         "gpuTemp": gpu_temp if gpu_temp > 0 else None,
-        "os": _os_name(),
-        "processor": _processor_name(),
+        "os": os_name,
+        "processor": processor,
         "cpuFrequencyMHz": cpu_freq_mhz,
         "totalRamGb": vm.total / (1024 ** 3),
         "gpuName": gpu_name or "未知",
