@@ -18,7 +18,7 @@ import urllib.request
 from .library import DATA_DIR
 from .paths import log
 
-APP_VERSION = "1.0.9"
+APP_VERSION = "1.0.10"
 CFG_FILE = os.path.join(DATA_DIR, "更新设置.json")
 DL_DIR = os.path.join(DATA_DIR, "更新下载")
 PENDING_META = os.path.join(DL_DIR, "pending.json")
@@ -148,39 +148,44 @@ def download_and_verify(url: str, sha256: str) -> str:
 
 UPDATER_PS1 = """param([string]$New,[string]$Target,[string]$ProcName,[string]$Meta,[switch]$NoRelaunch,[string]$Sha)
 $ErrorActionPreference = 'Stop'
+# 全部使用 .NET 接口，不依赖任何 PowerShell 模块（避免 PSModulePath 异常导致 cmdlet 缺失）
 for ($i = 0; $i -lt 7200; $i++) {
-    if (-not (Get-Process -Name $ProcName -ErrorAction SilentlyContinue)) { break }
-    Start-Sleep -Seconds 1
+    if ([System.Diagnostics.Process]::GetProcessesByName($ProcName).Length -eq 0) { break }
+    [System.Threading.Thread]::Sleep(1000)
 }
-Start-Sleep -Milliseconds 800
+[System.Threading.Thread]::Sleep(800)
 $stage = "${Target}.new"
 $backup = "${Target}.old"
 $done = $false
 for ($k = 0; $k -lt 30; $k++) {
     try {
-        Copy-Item -LiteralPath $New -Destination $stage -Force -ErrorAction Stop
+        [System.IO.File]::Copy($New, $stage, $true)
         if ($Sha) {
-            $h = (Get-FileHash -LiteralPath $stage -Algorithm SHA256).Hash.ToLower()
-            if ($h -ne $Sha.ToLower()) { throw "hash mismatch" }
+            $fs = [System.IO.File]::OpenRead($stage)
+            try {
+                $sha256 = [System.Security.Cryptography.SHA256]::Create()
+                $h = ([System.BitConverter]::ToString($sha256.ComputeHash($fs)) -replace '-', '').ToLower()
+            } finally { $fs.Dispose() }
+            if ($h -ne $Sha.ToLower()) { throw 'hash mismatch' }
         }
-        if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }
-        Move-Item -LiteralPath $Target -Destination $backup -Force -ErrorAction Stop
-        Move-Item -LiteralPath $stage -Destination $Target -Force -ErrorAction Stop
+        if ([System.IO.File]::Exists($backup)) { [System.IO.File]::Delete($backup) }
+        [System.IO.File]::Move($Target, $backup)
+        [System.IO.File]::Move($stage, $Target)
         $done = $true
         break
     } catch {
-        Start-Sleep -Seconds 2
+        [System.Threading.Thread]::Sleep(2000)
     }
 }
 if ($done) {
-    Remove-Item -LiteralPath $New -Force -ErrorAction SilentlyContinue
-    if ($Meta -and (Test-Path -LiteralPath $Meta)) { Remove-Item -LiteralPath $Meta -Force -ErrorAction SilentlyContinue }
-    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
-    if (-not $NoRelaunch) { Start-Process -LiteralPath $Target }
+    try { [System.IO.File]::Delete($New) } catch {}
+    try { if ($Meta -and [System.IO.File]::Exists($Meta)) { [System.IO.File]::Delete($Meta) } } catch {}
+    try { [System.IO.File]::Delete($backup) } catch {}
+    if (-not $NoRelaunch) { [System.Diagnostics.Process]::Start($Target) | Out-Null }
 } else {
-    Remove-Item -LiteralPath $stage -Force -ErrorAction SilentlyContinue
+    try { if ([System.IO.File]::Exists($stage)) { [System.IO.File]::Delete($stage) } } catch {}
 }
-Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+try { [System.IO.File]::Delete($PSCommandPath) } catch {}
 """
 
 
@@ -203,7 +208,10 @@ def apply(pending: str, relaunch: bool = True, meta: str = "", sha: str = "") ->
         cmd += ["-Sha", sha]
     if not relaunch:
         cmd += ["-NoRelaunch"]
-    subprocess.Popen(cmd, creationflags=flags, close_fds=True)
+    # 剔除继承来的 PSModulePath，避免子 PowerShell 加载到不匹配的模块目录
+    env = dict(os.environ)
+    env.pop("PSModulePath", None)
+    subprocess.Popen(cmd, creationflags=flags, close_fds=True, env=env)
     log("自动更新", "自替换脚本已拉起（relaunch=%s），等待本进程退出后覆盖" % relaunch, "成功")
 
 
