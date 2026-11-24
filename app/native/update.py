@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -18,11 +19,12 @@ import urllib.request
 from .library import DATA_DIR
 from .paths import log
 
-APP_VERSION = "1.0.13"
+APP_VERSION = "1.0.14"
 CFG_FILE = os.path.join(DATA_DIR, "更新设置.json")
 DL_DIR = os.path.join(DATA_DIR, "更新下载")
 PENDING_META = os.path.join(DL_DIR, "pending.json")
 UA = "XQToolbox-Updater/1.0"
+_DL_LOCK = threading.Lock()
 
 
 def read_cfg() -> dict:
@@ -107,43 +109,74 @@ def check(base: str) -> dict:
     }
 
 
+def _file_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while True:
+            chunk = fh.read(262144)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def download_and_verify(url: str, sha256: str) -> str:
-    """下载到 更新下载\\pending.exe 并校验 SHA256，返回落盘路径。失败自动重试一次。"""
+    """先下载到 .part 临时文件，校验通过后原子换入 pending.exe。
+
+    绝不直接写 pending.exe：多个触发点并发下载同一文件会互相截断，
+    留下哈希对不上的残缺包，导致退出时替换失败。
+    """
     os.makedirs(DL_DIR, exist_ok=True)
     target = os.path.join(DL_DIR, "pending.exe")
-    last = None
-    for attempt in range(2):
-        digest = hashlib.sha256()
-        size = 0
-        started = time.time()
+    want = str(sha256 or "").lower()
+    with _DL_LOCK:
+        if want and os.path.isfile(target):
+            try:
+                if _file_sha256(target) == want:
+                    log("自动更新", "已存在校验通过的更新包，跳过重复下载", "信息")
+                    return target
+            except Exception:
+                pass
+        part = target + ".part"
+        last = None
+        for attempt in range(2):
+            digest = hashlib.sha256()
+            size = 0
+            started = time.time()
+            try:
+                with _get(url, 120) as resp, open(part, "wb") as fh:
+                    while True:
+                        chunk = resp.read(262144)
+                        if not chunk:
+                            break
+                        fh.write(chunk)
+                        digest.update(chunk)
+                        size += len(chunk)
+            except Exception as exc:
+                last = exc
+                log("自动更新", "下载中断（第 %d 次）：%s" % (attempt + 1, exc), "警告")
+                time.sleep(1.0)
+                continue
+            if size < 1024 * 1024:
+                last = ValueError("下载文件过小（%d 字节），疑似直链失效" % size)
+                log("自动更新", "下载文件异常：%d 字节，准备重试" % size, "警告")
+                time.sleep(1.0)
+                continue
+            got = digest.hexdigest()
+            if want and got != want:
+                last = ValueError("SHA256 校验不一致，已丢弃下载包")
+                log("自动更新", "SHA256 不一致（期望 %s，实际 %s），准备重试" % (want, got), "警告")
+                time.sleep(1.0)
+                continue
+            os.replace(part, target)
+            log("自动更新", "更新包下载完成：%d 字节，用时 %.1fs，sha256=%s" % (size, time.time() - started, got), "成功")
+            return target
         try:
-            with _get(url, 120) as resp, open(target, "wb") as fh:
-                while True:
-                    chunk = resp.read(262144)
-                    if not chunk:
-                        break
-                    fh.write(chunk)
-                    digest.update(chunk)
-                    size += len(chunk)
-        except Exception as exc:
-            last = exc
-            log("自动更新", "下载中断（第 %d 次）：%s" % (attempt + 1, exc), "警告")
-            time.sleep(1.0)
-            continue
-        if size < 1024 * 1024:
-            last = ValueError("下载文件过小（%d 字节），疑似直链失效" % size)
-            log("自动更新", "下载文件异常：%d 字节，准备重试" % size, "警告")
-            time.sleep(1.0)
-            continue
-        got = digest.hexdigest()
-        if sha256 and got != sha256.lower():
-            last = ValueError("SHA256 校验不一致，已丢弃下载包")
-            log("自动更新", "SHA256 不一致（期望 %s，实际 %s），准备重试" % (str(sha256).lower(), got), "警告")
-            time.sleep(1.0)
-            continue
-        log("自动更新", "更新包下载完成：%d 字节，用时 %.1fs，sha256=%s" % (size, time.time() - started, got), "成功")
-        return target
-    raise last if last is not None else ValueError("下载失败")
+            if os.path.isfile(part):
+                os.remove(part)
+        except Exception:
+            pass
+        raise last if last is not None else ValueError("下载失败")
 
 
 UPDATER_PS1 = """param([string]$New,[string]$Target,[string]$ProcName,[string]$Meta,[switch]$NoRelaunch,[string]$Sha)
@@ -179,6 +212,7 @@ for ($i = 0; $i -lt 7200; $i++) {
 $stage = "${Target}.new"
 $backup = "${Target}.old"
 $done = $false
+$badHash = $false
 for ($k = 0; $k -lt 30; $k++) {
     try {
         [System.IO.File]::Copy($New, $stage, $true)
@@ -188,7 +222,7 @@ for ($k = 0; $k -lt 30; $k++) {
                 $sha256 = [System.Security.Cryptography.SHA256]::Create()
                 $h = ([System.BitConverter]::ToString($sha256.ComputeHash($fs)) -replace '-', '').ToLower()
             } finally { $fs.Dispose() }
-            if ($h -ne $Sha.ToLower()) { throw 'hash mismatch' }
+            if ($h -ne $Sha.ToLower()) { $badHash = $true; throw 'hash mismatch' }
         }
         if ([System.IO.File]::Exists($backup)) { [System.IO.File]::Delete($backup) }
         [System.IO.File]::Move($Target, $backup)
@@ -215,6 +249,11 @@ if ($done) {
     }
 } else {
     try { if ([System.IO.File]::Exists($stage)) { [System.IO.File]::Delete($stage) } } catch {}
+    # 包本身坏了就丢掉，下次启动重新下载，避免一直卡在坏包上
+    if ($badHash) {
+        try { [System.IO.File]::Delete($New) } catch {}
+        try { if ($Meta -and [System.IO.File]::Exists($Meta)) { [System.IO.File]::Delete($Meta) } } catch {}
+    }
 }
 try { [System.IO.File]::Delete($lock) } catch {}
 try { [System.IO.File]::Delete($PSCommandPath) } catch {}
