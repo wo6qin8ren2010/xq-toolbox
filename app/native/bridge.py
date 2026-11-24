@@ -730,9 +730,16 @@ class Bridge:
             res = update.check(cfg["base"])
             if res.get("status") == "available" and cfg["silent"]:
                 meta = update.stage(res["url"], res.get("sha256", ""), res["version"])
+                # 下载并校验完成立即挂上"退出即替换"脚本，不依赖后续再进设置页
+                armed = False
+                try:
+                    armed = update.arm_pending()
+                except Exception as exc:
+                    log("自动更新", "下载完成后挂载替换脚本失败：%s" % exc, "警告")
                 res = {
                     "status": "silent_ready",
                     "version": res["version"],
+                    "armed": bool(armed),
                     "msg": "新版本 v%s 已后台下载并校验，本次退出后自动套用，下次启动即新版" % res["version"],
                 }
         except Exception as exc:

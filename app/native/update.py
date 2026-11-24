@@ -18,7 +18,7 @@ import urllib.request
 from .library import DATA_DIR
 from .paths import log
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.4"
 CFG_FILE = os.path.join(DATA_DIR, "更新设置.json")
 DL_DIR = os.path.join(DATA_DIR, "更新下载")
 PENDING_META = os.path.join(DL_DIR, "pending.json")
@@ -148,9 +148,9 @@ def download_and_verify(url: str, sha256: str) -> str:
 
 UPDATER_PS1 = """param([string]$New,[string]$Target,[string]$ProcName,[string]$Meta,[switch]$NoRelaunch)
 $ErrorActionPreference = 'Stop'
-for ($i = 0; $i -lt 120; $i++) {
+for ($i = 0; $i -lt 7200; $i++) {
     if (-not (Get-Process -Name $ProcName -ErrorAction SilentlyContinue)) { break }
-    Start-Sleep -Milliseconds 500
+    Start-Sleep -Seconds 1
 }
 Copy-Item -LiteralPath $New -Destination $Target -Force
 Remove-Item -LiteralPath $New -Force
