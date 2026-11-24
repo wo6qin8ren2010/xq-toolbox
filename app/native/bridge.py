@@ -467,7 +467,10 @@ class Bridge:
         if len(args) < 4:
             return ""
         task_id, name, save_path = args[0], urllib.parse.unquote(args[1]), args[2]
-        url = urllib.parse.unquote("|".join(args[3:]))
+        # 前端下发的 url 是原始直链（未做 encodeURIComponent），这里不能再 unquote：
+        # 直链路径里的 %E5%B0%8F 之类是 URL 自身的编码，解开会变成中文，
+        # http.client 用 ASCII 编码请求行时直接抛 UnicodeEncodeError，下载秒失败。
+        url = "|".join(args[3:])
         self.downloader.start(task_id, name, save_path, url, notify_open)
         return ""
 

@@ -7,11 +7,47 @@ import threading
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 
 from .paths import log
 
 CHUNK = 256 * 1024
 MB = 1024.0 * 1024.0
+
+
+def ascii_safe_url(url: str) -> str:
+    """把直链里的非 ASCII 字符补成百分号编码。
+
+    已经是 %XX 的部分保持原样，签名查询串不动；
+    用户粘贴中文直链时也能正常发出请求，而不是 ASCII 编码报错。
+    """
+    try:
+        url.encode("ascii")
+        return url
+    except UnicodeEncodeError:
+        pass
+    parts = urllib.parse.urlsplit(url)
+    netloc = parts.netloc
+    if not netloc.isascii():
+        host, sep, port = netloc.rpartition(":")
+        if sep and port.isdigit():
+            try:
+                host = host.encode("idna").decode("ascii")
+            except Exception:
+                pass
+            netloc = host + sep + port
+        else:
+            try:
+                netloc = netloc.encode("idna").decode("ascii")
+            except Exception:
+                pass
+    return urllib.parse.urlunsplit((
+        parts.scheme,
+        netloc,
+        urllib.parse.quote(parts.path, safe="/%:@&=+$,~!*'()"),
+        urllib.parse.quote(parts.query, safe="=&%:+,/?~!*'()$@"),
+        urllib.parse.quote(parts.fragment, safe="=&%:+,/?~!*'()$@"),
+    ))
 
 
 class Downloader:
@@ -91,7 +127,7 @@ class Downloader:
         try:
             os.makedirs(os.path.dirname(task["path"]) or ".", exist_ok=True)
             offset = os.path.getsize(part) if os.path.isfile(part) else 0
-            request = urllib.request.Request(task["url"], headers={
+            request = urllib.request.Request(ascii_safe_url(task["url"]), headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MixerTools/1.0",
                 "Accept": "*/*",
             })
