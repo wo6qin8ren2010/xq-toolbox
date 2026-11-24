@@ -93,7 +93,7 @@
         closeAdminGate();
         postCommand('open_admin_panel');
       } else {
-        setAdminGateError('密码不正确，默认密码为 admin');
+        setAdminGateError('密码不正确，请联系小庆获取');
       }
       return true;
     }
@@ -494,9 +494,9 @@
       '<div style="width:320px;padding:26px 26px 22px;border-radius:16px;background:' + cardBg + ';' +
         'border:1px solid ' + line + ';box-shadow:0 18px 48px rgba(0,0,0,.35);color:' + fg + '">' +
         '<div style="font-size:16px;font-weight:700;margin-bottom:6px">打开网页后台</div>' +
-        '<div style="font-size:12px;color:' + sub + ';margin-bottom:16px">请输入入口密码（默认 admin）</div>' +
+        '<div style="font-size:12px;color:' + sub + ';margin-bottom:16px">请输入入口密码（请联系小庆获取）</div>' +
         '<input id="xqAdminGatePwd" type="password" maxlength="64" autocomplete="off" spellcheck="false" ' +
-          'placeholder="默认密码 admin" style="width:100%;box-sizing:border-box;padding:9px 12px;font-size:14px;' +
+          'placeholder="请联系小庆获取" style="width:100%;box-sizing:border-box;padding:9px 12px;font-size:14px;' +
           'border:1px solid ' + line + ';border-radius:10px;background:transparent;color:' + fg + ';outline:none">' +
         '<div id="xqAdminGateErr" style="display:none;font-size:12px;color:#e05a4a;margin-top:8px"></div>' +
         '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">' +
