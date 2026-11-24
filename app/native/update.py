@@ -18,7 +18,7 @@ import urllib.request
 from .library import DATA_DIR
 from .paths import log
 
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.8"
 CFG_FILE = os.path.join(DATA_DIR, "更新设置.json")
 DL_DIR = os.path.join(DATA_DIR, "更新下载")
 PENDING_META = os.path.join(DL_DIR, "pending.json")
@@ -146,21 +146,45 @@ def download_and_verify(url: str, sha256: str) -> str:
     raise last if last is not None else ValueError("下载失败")
 
 
-UPDATER_PS1 = """param([string]$New,[string]$Target,[string]$ProcName,[string]$Meta,[switch]$NoRelaunch)
+UPDATER_PS1 = """param([string]$New,[string]$Target,[string]$ProcName,[string]$Meta,[switch]$NoRelaunch,[string]$Sha)
 $ErrorActionPreference = 'Stop'
 for ($i = 0; $i -lt 7200; $i++) {
     if (-not (Get-Process -Name $ProcName -ErrorAction SilentlyContinue)) { break }
     Start-Sleep -Seconds 1
 }
-Copy-Item -LiteralPath $New -Destination $Target -Force
-Remove-Item -LiteralPath $New -Force
-if ($Meta -and (Test-Path -LiteralPath $Meta)) { Remove-Item -LiteralPath $Meta -Force }
-if (-not $NoRelaunch) { Start-Process -LiteralPath $Target }
-Remove-Item -LiteralPath $PSCommandPath -Force
+Start-Sleep -Milliseconds 800
+$stage = "${Target}.new"
+$backup = "${Target}.old"
+$done = $false
+for ($k = 0; $k -lt 30; $k++) {
+    try {
+        Copy-Item -LiteralPath $New -Destination $stage -Force -ErrorAction Stop
+        if ($Sha) {
+            $h = (Get-FileHash -LiteralPath $stage -Algorithm SHA256).Hash.ToLower()
+            if ($h -ne $Sha.ToLower()) { throw "hash mismatch" }
+        }
+        if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }
+        Move-Item -LiteralPath $Target -Destination $backup -Force -ErrorAction Stop
+        Move-Item -LiteralPath $stage -Destination $Target -Force -ErrorAction Stop
+        $done = $true
+        break
+    } catch {
+        Start-Sleep -Seconds 2
+    }
+}
+if ($done) {
+    Remove-Item -LiteralPath $New -Force -ErrorAction SilentlyContinue
+    if ($Meta -and (Test-Path -LiteralPath $Meta)) { Remove-Item -LiteralPath $Meta -Force -ErrorAction SilentlyContinue }
+    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+    if (-not $NoRelaunch) { Start-Process -LiteralPath $Target }
+} else {
+    Remove-Item -LiteralPath $stage -Force -ErrorAction SilentlyContinue
+}
+Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 """
 
 
-def apply(pending: str, relaunch: bool = True, meta: str = "") -> None:
+def apply(pending: str, relaunch: bool = True, meta: str = "", sha: str = "") -> None:
     """写自替换脚本并 detached 拉起；relaunch=False 时只覆盖不重启（静默更新用）。"""
     if not getattr(sys, "frozen", False):
         raise RuntimeError("开发模式不支持自替换，请用打包后的 exe 测试更新")
@@ -175,6 +199,8 @@ def apply(pending: str, relaunch: bool = True, meta: str = "") -> None:
            "-New", pending, "-Target", target, "-ProcName", proc_name]
     if meta:
         cmd += ["-Meta", meta]
+    if sha:
+        cmd += ["-Sha", sha]
     if not relaunch:
         cmd += ["-NoRelaunch"]
     subprocess.Popen(cmd, creationflags=flags, close_fds=True)
@@ -217,7 +243,7 @@ def arm_pending() -> bool:
     if not meta:
         return False
     try:
-        apply(meta["path"], relaunch=False, meta=PENDING_META)
+        apply(meta["path"], relaunch=False, meta=PENDING_META, sha=str(meta.get("sha256", "") or ""))
     except Exception as exc:
         log("自动更新", "挂载静默更新失败：%s" % exc, "警告")
         return False
