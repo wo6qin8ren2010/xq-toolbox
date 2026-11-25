@@ -12521,20 +12521,33 @@ function toggleLanguage() {
     }
 
     function xqApplyWallData(data) {
-        if (!data || !data.ok) return;
+        if (!data || !data.ok || !data.vw || !data.vh) return;
         var img = document.getElementById('xqWallImg');
-        if (!img || !data.src) return;
-        /* 有精确底图时按屏幕坐标对齐，比 cover 更贴合真实桌面 */
-        img.style.backgroundImage = 'url("' + data.src + '")';
-        img.style.backgroundSize = 'cover';
+        if (!img) return;
+        /* 小庆魔方式对位：整屏截屏糊图按窗口在屏幕上的位置精确裁贴，
+           外扩 pad 像素给 blur 留渗色边，移动窗口后看起来就是真磨砂玻璃 */
+        var dpr = window.devicePixelRatio || 1;
+        var pad = 30;
+        var sw = data.vw / dpr, sh = data.vh / dpr;
+        img.style.left = (-((data.wx || 0) - (data.vx || 0)) / dpr - pad) + 'px';
+        img.style.top = (-((data.wy || 0) - (data.vy || 0)) / dpr - pad) + 'px';
+        img.style.width = (sw + pad * 2) + 'px';
+        img.style.height = (sh + pad * 2) + 'px';
+        img.style.backgroundImage = 'url("' + (data.src || '../glass_wallpaper.jpg') + '?t=' + Date.now() + '")';
+        img.style.backgroundSize = sw + 'px ' + sh + 'px';
+        img.style.backgroundPosition = pad + 'px ' + pad + 'px';
+        img.style.backgroundRepeat = 'no-repeat';
     }
 
     function xqRefreshWall() {
         if (!cfg || String(cfg.glass || '') !== '1') return;
         xqEnsureWallLayer();
         var img = document.getElementById('xqWallImg');
-        /* 加时间戳避免"文件还没生成时加载失败被缓存"的问题 */
-        if (img) img.style.backgroundImage = 'url("../glass_wallpaper.jpg?t=' + Date.now() + '")';
+        /* 先用相对路径兜底（时间戳防缓存），再向原生要一张新鲜截屏底图 + 窗口几何 */
+        if (img && !img.style.backgroundSize) img.style.backgroundImage = 'url("../glass_wallpaper.jpg?t=' + Date.now() + '")';
+        try {
+            if (typeof sendMessageToCpp === 'function') sendMessageToCpp('glass_wall');
+        } catch (e) { /* ignore */ }
     }
 
     function applyGlass() {
@@ -12596,7 +12609,11 @@ function toggleLanguage() {
         setTimeout(xqAskGlassState, 1200);
     }
     setTimeout(xqAskGlassState, 200);
-    window.addEventListener('resize', function () { if (cfg && String(cfg.glass || '') === '1') xqRefreshWall(); });
+    var xqWallResizeT = 0;
+    window.addEventListener('resize', function () {
+        clearTimeout(xqWallResizeT);
+        xqWallResizeT = setTimeout(function () { if (cfg && String(cfg.glass || '') === '1') xqRefreshWall(); }, 350);
+    });
 
     function applyAll() {
         if (!cfg) cfg = readCfg();
@@ -13166,8 +13183,9 @@ function toggleLanguage() {
 :root:not([data-theme="dark"])[data-glass="1"] .home-overview-tab-list {
     background: rgba(255, 255, 255, .62) !important;
 }
-/* 磨砂底图：把当前桌面壁纸按屏幕尺寸铺在本窗口下方，再整体高斯模糊，
-   面板半透明后就能看到"桌面壁纸的毛玻璃"。 */
+/* 磨砂底图（小庆魔方方案）：原生抓一张「排除本窗口」的整屏快照当底图，
+   前端按窗口几何精确对位 + 高斯模糊，面板半透明后就是桌面的真毛玻璃。
+   下面的 cover 铺底只是几何数据到达前的兜底。 */
 #xqWallLayer {
     position: fixed; left: 0; top: 0; right: 0; bottom: 0;
     overflow: hidden; pointer-events: none; z-index: -1; display: none;

@@ -1,11 +1,18 @@
-"""全局磨砂（Windows 亚克力 / 云母）。
+"""全局磨砂 —— 移植「小庆魔方」的截屏磨砂方案。
 
-Windows 11 已不再支持老式的 ACCENT_ENABLE_ACRYLICBLURBEHIND（AccentState=4），
-所以这里按优先级尝试三种实现：
-  1) DWM 系统背景材质 SYSTEMBACKDROP_TYPE = Acrylic（Win11 22H2+ 推荐）
-  2) DWM Mica
-  3) SetWindowCompositionAttribute AccentState=5（宿主背景）/ 4（Win10 亚克力）
-配合把 WebView2 默认背景设为透明，网页里的半透明层就能透出桌面壁纸。
+小庆魔方的做法（逆向确认）：
+  1. 不用系统亚克力（Win11 的 WCA 亚克力是不透明灰，压暗后全黑，透不出桌面）；
+  2. 抓一张整屏快照当磨砂原料（不读壁纸文件——幻灯片/聚焦壁纸的注册表路径
+     和实际显示的图对不上）；
+  3. 快照重度模糊 + 压暗，只算一次；绘制时按窗口位置裁一块贴上，
+     移动/缩放不碰图像运算；窗口移动结束后重抓。
+
+本模块的对应实现：
+  - capture_backdrop()：先把本窗口设为「排除出截屏」(WDA_EXCLUDEFROMCAPTURE)，
+    抓整个虚拟屏，抓完立刻恢复；不支持时退化为 隐藏→抓屏→恢复。
+  - 抓到的图半尺寸存 JPEG，放到页面同级目录，前端按窗口几何精确对位，
+    CSS blur 做模糊（GPU 合成，移动窗口零图像运算）。
+  - 抓屏失败时退回读壁纸文件的旧方案，保证磨砂始终有底图。
 """
 from __future__ import annotations
 
@@ -281,8 +288,8 @@ def set_enabled(on: bool, light: bool = False) -> bool:
 
 
 def describe() -> str:
-    return "方式=%s，WebView2背景=%s，壁纸=%s" % (
-        _METHOD, _TRANSPARENT, _WALL_FILE or (_WALL_NOTE or "未生成"))
+    return "方式=%s，抓屏=%s，WebView2背景=%s，底图=%s" % (
+        _METHOD, _CAPTURE_NOTE, _TRANSPARENT, _WALL_FILE or (_WALL_NOTE or "未生成"))
 
 
 def is_enabled() -> bool:
@@ -388,6 +395,88 @@ def _build_wall_image() -> str:
 
 _WALL_NOTE = ""
 _WALL_FILE = ""
+_LAST_CAPTURE = 0.0
+_CAPTURE_NOTE = "未抓屏"
+
+WDA_EXCLUDEFROMCAPTURE = 0x11
+
+
+def _grab_virtual_screen():
+    """抓整个虚拟屏，返回半尺寸 Bitmap（调用方负责 Dispose）。"""
+    try:
+        import clr
+        clr.AddReference("System.Drawing")
+    except Exception:
+        pass
+    from System.Drawing import Bitmap, Graphics, Rectangle, GraphicsUnit, Size
+    from System.Drawing.Drawing2D import InterpolationMode
+    vx, vy, vw, vh = _virtual_screen()
+    full = Bitmap(vw, vh)
+    g = Graphics.FromImage(full)
+    g.CopyFromScreen(vx, vy, 0, 0, Size(vw, vh))
+    g.Dispose()
+    half = Bitmap(max(1, vw // 2), max(1, vh // 2))
+    g2 = Graphics.FromImage(half)
+    g2.InterpolationMode = InterpolationMode.HighQualityBicubic
+    g2.DrawImage(full, Rectangle(0, 0, half.Width, half.Height),
+                 Rectangle(0, 0, vw, vh), GraphicsUnit.Pixel)
+    g2.Dispose()
+    full.Dispose()
+    return half
+
+
+def capture_backdrop(min_gap: float = 0.4) -> str:
+    """小庆魔方式截屏磨砂底：抓屏时把本窗口排除，抓完恢复。带节流。"""
+    global _LAST_CAPTURE, _CAPTURE_NOTE, _WALL_FILE
+    now = _time.monotonic()
+    if now - _LAST_CAPTURE < min_gap and _WALL_FILE:
+        return _WALL_FILE
+    _LAST_CAPTURE = now
+    hwnd = _HWND or _locate()
+    if not hwnd:
+        return ensure_wallpaper()
+    u = ctypes.windll.user32
+    bmp = None
+    mode = ""
+    try:
+        excluded = bool(u.SetWindowDisplayAffinity(wintypes.HWND(hwnd), WDA_EXCLUDEFROMCAPTURE))
+        if excluded:
+            mode = "排除截屏"
+            try:
+                _time.sleep(0.05)  # 等 DWM 把窗口从合成画面里摘掉
+                bmp = _grab_virtual_screen()
+            finally:
+                u.SetWindowDisplayAffinity(wintypes.HWND(hwnd), 0)
+        else:
+            mode = "隐藏抓屏"
+            u.ShowWindow(wintypes.HWND(hwnd), 0)   # SW_HIDE
+            try:
+                _time.sleep(0.09)
+                bmp = _grab_virtual_screen()
+            finally:
+                u.ShowWindow(wintypes.HWND(hwnd), 8)  # SW_SHOWNA 不抢焦点
+    except Exception as exc:
+        _CAPTURE_NOTE = "抓屏失败:%s" % str(exc)[:60]
+        return ensure_wallpaper()
+    if bmp is None:
+        return ensure_wallpaper()
+    try:
+        from System.Drawing.Imaging import ImageFormat
+        os.makedirs(_CACHE_DIR, exist_ok=True)
+        vx, vy, vw, vh = _virtual_screen()
+        cache = os.path.join(_CACHE_DIR, "screen_work.jpg")
+        bmp.Save(cache, ImageFormat.Jpeg)
+        bmp.Dispose()
+        from .paths import ui_dir
+        target = os.path.join(os.path.dirname(ui_dir()), "glass_wallpaper.jpg")
+        import shutil
+        shutil.copyfile(cache, target)
+        _WALL_FILE = target
+        _CAPTURE_NOTE = mode
+        return target
+    except Exception as exc:
+        _CAPTURE_NOTE = "落盘失败:%s" % str(exc)[:60]
+        return ensure_wallpaper()
 
 
 def ensure_wallpaper() -> str:
@@ -412,15 +501,21 @@ def ensure_wallpaper() -> str:
 
 
 def payload() -> str:
-    """给前端的磨砂底图信息：图片地址 + 屏幕/窗口几何（物理像素）。"""
-    path = _build_wall_image()
+    """给前端的磨砂底图信息：相对路径 + 屏幕/窗口几何（物理像素）。
+
+    前端页面挂在 WebView2 虚拟主机下，file:// 绝对路径会被拦，
+    所以统一用页面相对路径 ../glass_wallpaper.jpg（前端自己加时间戳防缓存）。
+    """
+    path = capture_backdrop()
     if not path:
-        return '{"ok":0,"note":"%s"}' % (_WALL_NOTE or "没有壁纸图")
+        path = ensure_wallpaper()
+    if not path:
+        return '{"ok":0,"note":"%s"}' % (_WALL_NOTE or "没有底图")
     vx, vy, vw, vh = _virtual_screen()
     wx, wy, ww, wh = _window_rect()
-    url = path.replace("\\", "/")
-    return ('{"ok":1,"src":"file:///%s","vx":%d,"vy":%d,"vw":%d,"vh":%d,'
-            '"wx":%d,"wy":%d,"ww":%d,"wh":%d}' % (url, vx, vy, vw, vh, wx, wy, ww, wh))
+    return ('{"ok":1,"src":"../glass_wallpaper.jpg","vx":%d,"vy":%d,"vw":%d,"vh":%d,'
+            '"wx":%d,"wy":%d,"ww":%d,"wh":%d,"mode":"%s"}'
+            % (vx, vy, vw, vh, wx, wy, ww, wh, _CAPTURE_NOTE))
 
 
 def _load_state() -> None:

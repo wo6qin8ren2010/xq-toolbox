@@ -215,7 +215,7 @@ class Bridge:
         self.bus.push("glass_move")
 
     def _cmd_glass_wall(self, args, raw):
-        """磨砂底图：把当前桌面壁纸画成屏幕大小的模糊底图，并给出窗口几何。"""
+        """磨砂底图：抓一张排除本窗口的整屏快照（小庆魔方方案），并给出窗口几何。"""
         try:
             from . import glass
             return "glass_wall|" + glass.payload()
