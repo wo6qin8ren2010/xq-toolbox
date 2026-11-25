@@ -928,109 +928,175 @@
   }
 })();
 
-/* 侧栏实时监控 HUD：CPU / 显卡温度与占用，每秒刷新 */
+/* 侧栏音乐组件：跟随 Windows 系统媒体会话，显示封面/曲名/歌词并控制播放 */
 (function () {
-  var METERS = [['cpu', 'CPU 使用'], ['gpu', 'GPU 使用'], ['ram', '内存'], ['vram', '显存']];
-  var BARS = 18;
-  var history = [];
   var panel = null;
   var timer = null;
+  var lastKey = '';
+  var lastPlaying = null;
+
+  var ICON_NOTE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>';
+  // 小表情人（纯 SVG 自绘，白色圆脸，播放时浮动/眨眼/张嘴唱歌，暂停静止）
+  var PET_SVG = '<svg class="xq-mu-face" data-face viewBox="0 0 48 48" aria-hidden="true">' +
+    '<defs><radialGradient id="xqPetG" cx="46%" cy="28%" r="76%">' +
+      '<stop offset="0%" stop-color="#ffffff"/><stop offset="68%" stop-color="#eaf3ff"/><stop offset="100%" stop-color="#c6dcfa"/>' +
+    '</radialGradient></defs>' +
+    '<circle cx="24" cy="26" r="15.6" fill="url(#xqPetG)" stroke="rgba(118,166,228,.55)" stroke-width="1.1"/>' +
+    '<circle class="xq-pet-blush" cx="14.6" cy="30.6" r="2.9" fill="#ffb0c4" opacity=".55"/>' +
+    '<circle class="xq-pet-blush" cx="33.4" cy="30.6" r="2.9" fill="#ffb0c4" opacity=".55"/>' +
+    '<g class="xq-pet-eye">' +
+      '<ellipse cx="18.8" cy="24.4" rx="2.5" ry="3.1" fill="#2f4c6e"/>' +
+      '<ellipse cx="29.2" cy="24.4" rx="2.5" ry="3.1" fill="#2f4c6e"/>' +
+      '<circle cx="17.9" cy="23.3" r=".85" fill="#fff" opacity=".9"/>' +
+      '<circle cx="28.3" cy="23.3" r=".85" fill="#fff" opacity=".9"/>' +
+    '</g>' +
+    '<path class="xq-pet-mouth" d="M19.8 31.6q4.2 3 8.4 0" stroke="#2f4c6e" stroke-width="1.6" stroke-linecap="round" fill="none"/>' +
+    '<g class="xq-pet-note">' +
+      '<path d="M35.4 12.6v-5.6l5.2-1.3v4.1" stroke="#7fb2ef" stroke-width="1.3" fill="none" stroke-linecap="round"/>' +
+      '<circle cx="33.5" cy="13.4" r="2.2" fill="#7fb2ef"/><circle cx="38.7" cy="10.4" r="2.2" fill="#7fb2ef"/>' +
+    '</g>' +
+  '</svg>';
+  var ICON_PREV = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h2v14H7zM19 5v14l-9-7z"/></svg>';
+  var ICON_NEXT = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 5h2v14h-2zM5 5l9 7-9 7z"/></svg>';
+  var ICON_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5l11 7-11 7z"/></svg>';
+  var ICON_PAUSE = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h3.4v14H7zM13.6 5H17v14h-3.4z"/></svg>';
 
   function panelHtml() {
-    var meters = '';
-    for (var i = 0; i < METERS.length; i++) {
-      meters +=
-        '<div class="xq-meter"><div class="xq-meter-top"><span>' + METERS[i][1] + '</span>' +
-        '<b data-val="' + METERS[i][0] + '">--%</b></div>' +
-        '<div class="xq-meter-bar"><i data-bar="' + METERS[i][0] + '"></i></div></div>';
-    }
-    var bars = '';
-    for (var b = 0; b < BARS; b++) { bars += '<i></i>'; }
-    return '<div class="xq-hud-art"></div><div class="xq-hud-scan"></div><div class="xq-hud-sweep"></div>' +
-      '<div class="xq-hud-head"><span class="xq-hud-dot"></span><span>实时监控</span><span class="xq-hud-live">LIVE</span></div>' +
-      '<div class="xq-hud-temps">' +
-        '<div class="xq-hud-temp"><span class="lab">CPU</span><span class="val" data-temp="cpuTemp">--</span><span class="unit">°C</span></div>' +
-        '<div class="xq-hud-temp"><span class="lab">GPU</span><span class="val" data-temp="gpuTemp">--</span><span class="unit">°C</span></div>' +
+    return '<div class="xq-mu-head"><span>音乐</span><span class="xq-mu-src" data-src></span></div>' +
+      '<div class="xq-mu-main">' +
+        '<div class="xq-mu-art" data-art><span class="xq-mu-cover" data-coverbg></span><span class="xq-mu-note">' + ICON_NOTE + '</span></div>' +
+        '<div class="xq-mu-meta">' +
+          '<div class="xq-mu-title" data-title>等待系统音乐</div>' +
+          '<div class="xq-mu-artist" data-artist>开始播放后显示曲名与封面</div>' +
+        '</div>' +
+        '<span class="xq-mu-pet" data-pet>' + PET_SVG + '</span>' +
       '</div>' +
-      '<div class="xq-hud-bars">' + bars + '</div>' +
-      meters +
-      '<div class="xq-hud-foot" data-foot>等待监控数据…</div>';
+      '<div class="xq-mu-lyric" data-lyric></div>' +
+      '<div class="xq-mu-bar"><i data-progress></i></div>' +
+      '<div class="xq-mu-ctrl">' +
+        '<button type="button" data-act="prev" title="上一曲">' + ICON_PREV + '</button>' +
+        '<button type="button" data-act="playpause" class="is-primary" title="播放/暂停">' + ICON_PLAY + '</button>' +
+        '<button type="button" data-act="next" title="下一曲">' + ICON_NEXT + '</button>' +
+      '</div>' +
+      '<div class="xq-mu-foot" data-foot>暂无音乐播放</div>';
   }
 
   function ensurePanel() {
     var sidebar = document.getElementById('sidebar');
     if (!sidebar) return;
-    var existing = document.getElementById('xqHud');
+    var existing = document.getElementById('xqMusic');
     if (existing && existing.parentElement === sidebar) { panel = existing; return; }
-    if (existing) existing.parentElement.removeChild(existing);
+    if (existing && existing.parentElement) existing.parentElement.removeChild(existing);
     var el = document.createElement('div');
-    el.className = 'xq-hud';
-    el.id = 'xqHud';
+    el.className = 'xq-music';
+    el.id = 'xqMusic';
     el.innerHTML = panelHtml();
+    el.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest('button[data-act]') : null;
+      if (!btn || btn.disabled) return;
+      e.preventDefault();
+      try { window.chrome.webview.postMessage('music_control|' + btn.getAttribute('data-act')); } catch (err) { /* ignore */ }
+      setTimeout(request, 220);
+    });
     var sep = sidebar.querySelector('.nav-item.nav-separator');
     if (sep && sep.parentElement === sidebar) sidebar.insertBefore(el, sep);
     else sidebar.appendChild(el);
     panel = el;
+    lastKey = '';
+    lastPlaying = null;
   }
 
-  function setTemp(key, value) {
-    if (!panel) return;
-    var node = panel.querySelector('[data-temp="' + key + '"]');
-    if (!node) return;
-    var ok = typeof value === 'number' && isFinite(value) && value > 0;
-    node.textContent = ok ? Math.round(value) : '--';
-    node.classList.toggle('is-na', !ok);
-    if (ok) {
-      node.style.transform = 'scale(1.12)';
-      setTimeout(function () { if (node) node.style.transform = ''; }, 160);
+  function q(sel) { return panel ? panel.querySelector(sel) : null; }
+
+  function fmt(sec) {
+    sec = Math.max(0, Math.floor(Number(sec) || 0));
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function apply(d) {
+    if (!panel || !d) return;
+    var active = !!d.active;
+    panel.classList.toggle('is-active', active);
+
+    var title = q('[data-title]'), artist = q('[data-artist]');
+    if (title) {
+      title.textContent = active ? (d.title || '未知曲目') : '等待系统音乐';
+      title.title = active ? (d.title || '') : '';
     }
-  }
-
-  function setMeter(key, value) {
-    if (!panel) return;
-    var pct = Math.max(0, Math.min(100, Number(value) || 0));
-    var textNode = panel.querySelector('[data-val="' + key + '"]');
-    if (textNode) textNode.textContent = Math.round(pct) + '%';
-    var barNode = panel.querySelector('[data-bar="' + key + '"]');
-    if (barNode) barNode.style.width = pct.toFixed(1) + '%';
-  }
-
-  function pushHistory(value) {
-    history.push(Math.max(0, Math.min(100, Number(value) || 0)));
-    if (history.length > BARS) history.shift();
-    if (!panel) return;
-    var bars = panel.querySelectorAll('.xq-hud-bars i');
-    var start = BARS - history.length;
-    for (var i = 0; i < bars.length; i++) {
-      var v = i >= start ? history[i - start] : 0;
-      bars[i].style.height = Math.max(7, Math.min(100, v * 1.5)) + '%';
+    if (artist) {
+      artist.textContent = active ? (d.artist || d.album || '未知歌手') : '播放后显示曲名与封面';
+      artist.title = active ? (d.artist || '') : '';
     }
-  }
 
-  function apply(payload) {
-    if (!panel || !payload) return;
-    setTemp('cpuTemp', payload.cpuTemp);
-    setTemp('gpuTemp', payload.gpuTemp);
-    setMeter('cpu', payload.cpu);
-    setMeter('gpu', payload.gpu);
-    setMeter('ram', payload.ram);
-    setMeter('vram', payload.vram);
-    pushHistory(payload.cpu);
-    var foot = panel.querySelector('[data-foot]');
-    if (foot) foot.textContent = payload.gpuName || '实时监控数据';
+    var art = q('[data-art]');
+    if (art) {
+      var key = active ? (d.cover || '') : '';
+      if (key !== lastKey) {
+        lastKey = key;
+        var coverEl = q('[data-coverbg]');
+        if (key) {
+          if (coverEl) coverEl.style.backgroundImage = 'url("' + key + '")';
+          art.classList.add('has-cover');
+        } else {
+          if (coverEl) coverEl.style.backgroundImage = '';
+          art.classList.remove('has-cover');
+        }
+      }
+    }
+
+    var playing = d.status === 'playing';
+    panel.classList.toggle('is-playing', active && playing);
+    var playBtn = q('button[data-act="playpause"]');
+    if (playBtn && playing !== lastPlaying) {
+      lastPlaying = playing;
+      playBtn.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
+    }
+    if (playBtn) playBtn.disabled = !active || !(d.canPlay || d.canPause);
+    var prevBtn = q('button[data-act="prev"]'), nextBtn = q('button[data-act="next"]');
+    if (prevBtn) prevBtn.disabled = !active || !d.canPrev;
+    if (nextBtn) nextBtn.disabled = !active || !d.canNext;
+
+    var lyric = q('[data-lyric]');
+    if (lyric) {
+      var text = '';
+      if (!active) text = '';
+      else if (d.lyric) text = d.lyric;
+      else if (d.lyricState === 'loading') text = '歌词加载中…';
+      else if (d.lyricState === 'none') text = '暂无歌词';
+      lyric.textContent = text;
+      lyric.title = text;
+      lyric.style.display = text ? '' : 'none';
+    }
+
+    var bar = q('[data-progress]');
+    if (bar) {
+      var pct = (d.duration > 0) ? Math.max(0, Math.min(100, d.position / d.duration * 100)) : 0;
+      bar.style.width = pct.toFixed(2) + '%';
+    }
+
+    var src = q('[data-src]');
+    if (src) src.textContent = active ? (playing ? '播放中' : '已暂停') : '';
+
+    var foot = q('[data-foot]');
+    if (foot) {
+      foot.textContent = active
+        ? (fmt(d.position) + ' / ' + (d.duration > 0 ? fmt(d.duration) : '--:--'))
+        : '暂无音乐播放';
+    }
   }
 
   function request() {
     ensurePanel();
     if (!panel) return;
-    try { window.chrome.webview.postMessage('monitor_snapshot'); } catch (e) { /* ignore */ }
+    try { window.chrome.webview.postMessage('music_snapshot'); } catch (e) { /* ignore */ }
   }
 
   function onMessage(event) {
     var s = String((event && event.data) || '');
-    if (s.indexOf('monitor|') !== 0) return;
+    if (s.indexOf('music|') !== 0) return;
     var data = null;
-    try { data = JSON.parse(s.slice('monitor|'.length)); } catch (e) { return; }
+    try { data = JSON.parse(s.slice('music|'.length)); } catch (e) { return; }
     apply(data);
   }
 
@@ -1051,31 +1117,30 @@
   } else {
     init();
   }
-})();
-
-/* 侧栏天气块：Open-Meteo 免费接口，当前天气 + 7 天预报，城市可换、30 分钟自动刷新 */
+})();/* 侧栏天气块：Open-Meteo 免费接口，当前天气 + 7 天预报，城市可换、30 分钟自动刷新 */
 (function () {
   'use strict';
   var CITIES = {
     '北京': [39.9042, 116.4074], '上海': [31.2304, 121.4737], '广州': [23.1291, 113.2644],
     '深圳': [22.5431, 114.0579], '成都': [30.5728, 104.0668], '杭州': [30.2741, 120.1551],
     '武汉': [30.5928, 114.3055], '西安': [34.3416, 108.9398], '哈尔滨': [45.8038, 126.5349],
-    '乌鲁木齐': [43.8256, 87.6168]
+    '乌鲁木齐': [43.8256, 87.6168], '大连': [38.9140, 121.6147], '苏州': [31.3041, 120.5954],
+    '青岛': [36.0671, 120.3826], '重庆': [29.5630, 106.5516], '南京': [32.0603, 118.7969]
   };
   var WD = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
   var card = null;
 
   function cfg() { try { return JSON.parse(localStorage.getItem('xq_wx_cfg') || '{}'); } catch (e) { return {}; } }
   function saveCfg(c) { try { localStorage.setItem('xq_wx_cfg', JSON.stringify(c)); } catch (e) { /* ignore */ } }
-  function city() { var c = cfg().city; return CITIES[c] ? c : '北京'; }
+  function city() { var c = cfg(); return CITIES[c.city] ? c.city : '北京'; }
   function coords() {
     var c = cfg();
-    if (c.auto !== false && c.custom && c.custom.lat != null) return [c.custom.lat, c.custom.lon];
+    if (c.custom && c.custom.lat != null && c.custom.lon != null) return [c.custom.lat, c.custom.lon];
     return CITIES[c.city] || CITIES['北京'];
   }
   function cityName() {
     var c = cfg();
-    if (c.auto !== false && c.custom && c.custom.name) return c.custom.name;
+    if (c.custom && c.custom.name) return c.custom.name;
     return city();
   }
   function locate(done) {
@@ -1090,11 +1155,16 @@
     }
     next();
   }
-  function syncSelect() {
-    var sel = document.getElementById('xqWxCity');
-    var c = cfg();
-    if (sel) sel.value = c.auto !== false ? '__auto' : city();
-    set('xqWxGeo', c.auto !== false ? cityName() : '');
+  function syncCity() {
+    var name = cityName();
+    set('xqWxCityName', name);
+    var btn = document.getElementById('xqWxCityBtn');
+    if (btn) btn.title = '当前城市：' + name + '（点击更换）';
+    set('xqWxGeo', cfg().custom && cfg().custom.auto ? 'IP 定位' : '');
+    var chips = document.querySelectorAll('#xqWxPresets .xq-wx-chip');
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].classList.toggle('is-on', chips[i].getAttribute('data-city') === name);
+    }
   }
 
   function wmo(code, day) {
@@ -1129,33 +1199,181 @@
     return open + body + '</svg>';
   }
 
+  function applyCity(name, lat, lon) {
+    var c = cfg();
+    c.auto = false;
+    c.custom = lat != null ? { name: name, lat: lat, lon: lon, auto: false } : null;
+    c.city = lat != null ? '' : name;
+    saveCfg(c);
+    syncCity();
+    closeCityPanel();
+    set('xqWxCond', '加载中…');
+    load();
+  }
+
+  function closeCityPanel() {
+    var panel = document.getElementById('xqWxCityPanel');
+    if (panel) panel.hidden = true;
+  }
+
+  // 地名库对「大连」这类简称只给同名小地方（福建/海南…），补搜「大连市」才能拿到辽宁大连。
+  // 多个变体并发查询后合并，按人口降序，人最多的一般就是用户要的那个城市。
+  function searchCities(q, done) {
+    var variants = [q];
+    if (!/市$/.test(q)) variants.push(q + '市');
+    var rows = [];
+    var pending = variants.length;
+    var finished = false;
+    function finish() {
+      if (finished) return;
+      finished = true;
+      var seen = {}, list = [];
+      rows.forEach(function (it) {
+        if (!it || it.latitude == null) return;
+        var key = it.name + '|' + (it.admin1 || '');
+        if (seen[key]) return;
+        seen[key] = 1;
+        list.push(it);
+      });
+      list.sort(function (a, b) { return (b.population || 0) - (a.population || 0); });
+      done(list.slice(0, 8));
+    }
+    variants.forEach(function (v) {
+      var url = 'https://geocoding-api.open-meteo.com/v1/search?name=' + encodeURIComponent(v) +
+        '&count=8&language=zh&format=json&countryCode=CN';
+      fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+        (d && d.results || []).forEach(function (it) { rows.push(it); });
+      }).catch(function () { /* 单个变体失败不影响其它 */ }).then(function () {
+        pending -= 1;
+        if (pending <= 0) finish();
+      });
+    });
+  }
+
+  function bindCityControls(el) {
+    var btn = el.querySelector('#xqWxCityBtn');
+    var panel = el.querySelector('#xqWxCityPanel');
+    var input = el.querySelector('#xqWxSearch');
+    var results = el.querySelector('#xqWxResults');
+    var timer = null;
+
+    if (btn && panel) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        panel.hidden = !panel.hidden;
+        if (!panel.hidden && input) { input.value = ''; results.innerHTML = ''; setTimeout(function () { input.focus(); }, 0); }
+      });
+    }
+    if (panel) panel.addEventListener('click', function (e) { e.stopPropagation(); });
+    if (!window.__xqWxDocBound) {
+      document.addEventListener('click', closeCityPanel);
+      window.__xqWxDocBound = true;
+    }
+
+    el.querySelector('#xqWxPresets').addEventListener('click', function (e) {
+      var chip = e.target.closest('.xq-wx-chip');
+      if (chip) applyCity(chip.getAttribute('data-city'), null, null);
+    });
+
+    el.querySelector('#xqWxLocate').addEventListener('click', function () {
+      var c = cfg();
+      c.auto = true; c.custom = null; saveCfg(c);
+      set('xqWxCond', '定位中…');
+      closeCityPanel();
+      locate(function (g) {
+        var c2 = cfg();
+        if (g) { c2.custom = { name: g.name, lat: g.lat, lon: g.lon, auto: true }; }
+        else { c2.auto = false; c2.city = '北京'; }
+        saveCfg(c2); syncCity(); load();
+      });
+    });
+
+    if (input) {
+      input.addEventListener('input', function () {
+        var q = this.value.trim();
+        if (timer) clearTimeout(timer);
+        if (q.length < 1) { results.innerHTML = ''; return; }
+        timer = setTimeout(function () {
+          results.innerHTML = '<div class="xq-wx-tip">搜索中…</div>';
+          searchCities(q, function (list) {
+            if (!list.length) { results.innerHTML = '<div class="xq-wx-tip">没找到这个城市</div>'; return; }
+            results.innerHTML = list.map(function (it, i) {
+              var sub = [it.admin1, it.country].filter(Boolean).join(' · ');
+              var pop = it.population ? (it.population >= 10000 ? Math.round(it.population / 10000) + ' 万人' : '') : '';
+              return '<button type="button" class="xq-wx-hit" data-i="' + i + '">' +
+                '<b>' + it.name + '</b><span>' + sub + '</span>' +
+                (pop ? '<span class="pop">' + pop + '</span>' : '') +
+                (i === 0 ? '<span class="best">推荐</span>' : '') +
+                '</button>';
+            }).join('');
+            results.__list = list;
+          });
+        }, 400);
+      });
+    }
+
+    if (results) {
+      results.addEventListener('click', function (e) {
+        var hit = e.target.closest('.xq-wx-hit');
+        if (!hit || !results.__list) return;
+        var it = results.__list[Number(hit.getAttribute('data-i'))];
+        if (it) applyCity(it.name, it.latitude, it.longitude);
+      });
+    }
+  }
+
+  var ICON_FEEL = '<svg viewBox="0 0 24 24" fill="none" stroke="#f0932b" stroke-width="1.7" stroke-linecap="round"><path d="M14 14.76V4a2 2 0 0 0-4 0v10.76a4 4 0 1 0 4 0z"/><path d="M12 8v6" stroke="#f0932b"/></svg>';
+  var ICON_HUM = '<svg viewBox="0 0 24 24" fill="none" stroke="#3d9df3" stroke-width="1.7" stroke-linecap="round"><path d="M12 3.2c3.2 4 5.2 6.4 5.2 9.2a5.2 5.2 0 0 1-10.4 0c0-2.8 2-5.2 5.2-9.2z"/></svg>';
+  var ICON_WIND = '<svg viewBox="0 0 24 24" fill="none" stroke="#2bb3c0" stroke-width="1.7" stroke-linecap="round"><path d="M4 9h9a2.5 2.5 0 1 0-2.5-3"/><path d="M4 14h13a2.5 2.5 0 1 1-2.5 3"/><path d="M4 19h6"/></svg>';
+  var ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="#e8b02a" stroke-width="1.7" stroke-linecap="round"><path d="M3 17h4a2 2 0 0 0 0-4H5"/><path d="M10 5v2M6.4 6.4l1.4 1.4M3 9h1.4"/><circle cx="10" cy="10" r="5" stroke="#e8b02a"/><path d="M17 19h4"/></svg>';
+  var ICON_GEO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="11" r="7"/><path d="M5 11h14"/><path d="M12 4c2 2.2 3 4.4 3 7s-1 4.8-3 7c-2-2.2-3-4.4-3-7s1-4.8 3-7z"/></svg>';
+
   function skeleton() {
-    var auto = cfg().auto !== false;
-    var opts = '<option value="__auto"' + (auto ? ' selected' : '') + '>自动定位（IP）</option>' +
-      Object.keys(CITIES).map(function (k) {
-        return '<option value="' + k + '"' + (!auto && k === city() ? ' selected' : '') + '>' + k + '</option>';
-      }).join('');
-    return '<div class="xq-wx-col">' +
-      '<div class="xq-wx-head"><span class="t"><b>当地</b> 天气</span>' +
-      '<button type="button" class="xq-wx-refresh" id="xqWxRefresh">刷新</button></div>' +
-      '<div class="xq-wx-date" id="xqWxDate"></div>' +
-      '<div class="xq-wx-now"><span class="xq-wx-ico" id="xqWxIco"></span><div>' +
-      '<div class="xq-wx-temp" id="xqWxTemp">--°</div><div class="xq-wx-cond" id="xqWxCond">加载中…</div></div></div>' +
-      '<select id="xqWxCity" class="xq-wx-city" title="切换城市">' + opts + '</select>' +
-      '<span class="xq-wx-geo" id="xqWxGeo"></span>' +
+    var presets = Object.keys(CITIES).map(function (k) {
+      return '<button type="button" class="xq-wx-chip" data-city="' + k + '">' + k + '</button>';
+    }).join('');
+    return '<div class="xq-wx-head">' +
+        '<span class="t"><b>当地</b> 天气</span>' +
+        '<span class="xq-wx-date" id="xqWxDate"></span>' +
+        '<span class="xq-wx-hacts"><button type="button" class="xq-wx-refresh" id="xqWxRefresh">刷新</button>' +
+        '<button type="button" class="xq-wx-gear" id="xqWxGear" title="天气设置">⋯</button></span>' +
       '</div>' +
-      '<div class="xq-wx-col"><div class="xq-wx-tiles">' +
-      '<div class="xq-wx-tile"><span>体感</span><b id="xqWxFeel">--</b></div>' +
-      '<div class="xq-wx-tile"><span>湿度</span><b id="xqWxHum">--</b></div>' +
-      '<div class="xq-wx-tile"><span>风速</span><b id="xqWxWind">--</b></div>' +
-      '<div class="xq-wx-tile"><span>日出 / 日落</span><b id="xqWxSun">--</b></div>' +
-      '</div><div class="xq-wx-err" id="xqWxErr" style="display:none"></div></div>' +
-      '<div class="xq-wx-col">' +
-      '<div class="xq-wx-week" id="xqWxWeekHi"></div>' +
-      '<svg class="xq-wx-curve" id="xqWxCurve" viewBox="0 0 196 26" preserveAspectRatio="none"></svg>' +
-      '<div class="xq-wx-week" id="xqWxWeekLo"></div>' +
-      '<div class="xq-wx-foot">Open-Meteo</div>' +
-      '</div>';
+      '<div class="xq-wx-hero">' +
+        '<div class="xq-wx-herometa">' +
+          '<span class="xq-wx-ico" id="xqWxIco"></span>' +
+          '<div class="xq-wx-herotext">' +
+            '<div class="xq-wx-temp" id="xqWxTemp">--°</div>' +
+            '<div class="xq-wx-cond" id="xqWxCond">加载中…</div>' +
+            '<div class="xq-wx-citywrap">' +
+              '<button type="button" class="xq-wx-citybtn" id="xqWxCityBtn" title="点击更换城市">' +
+                '<span class="gico">' + ICON_GEO + '</span><span id="xqWxCityName">北京</span>' +
+                '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>' +
+              '</button>' +
+              '<div class="xq-wx-citypanel" id="xqWxCityPanel" hidden>' +
+                '<div class="xq-wx-searchrow">' +
+                  '<input type="text" id="xqWxSearch" placeholder="输入城市名，如 大连 / 苏州" autocomplete="off">' +
+                  '<button type="button" class="xq-wx-locbtn" id="xqWxLocate" title="重新自动定位">自动定位</button>' +
+                '</div>' +
+                '<div class="xq-wx-results" id="xqWxResults"></div>' +
+                '<div class="xq-wx-presets" id="xqWxPresets">' + presets + '</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="xq-wx-tiles">' +
+          '<div class="xq-wx-tile"><span class="ic">' + ICON_FEEL + '</span><span class="lb">体感</span><b id="xqWxFeel">--</b></div>' +
+          '<div class="xq-wx-tile"><span class="ic">' + ICON_HUM + '</span><span class="lb">湿度</span><b id="xqWxHum">--</b></div>' +
+          '<div class="xq-wx-tile"><span class="ic">' + ICON_WIND + '</span><span class="lb">风速</span><b id="xqWxWind">--</b></div>' +
+          '<div class="xq-wx-tile"><span class="ic">' + ICON_SUN + '</span><span class="lb">日出 / 日落</span><b id="xqWxSun">--</b></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="xq-wx-week">' +
+        '<div class="xq-wx-weekdays" id="xqWxWeekHi"></div>' +
+        '<svg class="xq-wx-curve" id="xqWxCurve" viewBox="0 0 196 26" preserveAspectRatio="none"></svg>' +
+        '<div class="xq-wx-weekdays" id="xqWxWeekLo"></div>' +
+      '</div>' +
+      '<div class="xq-wx-err" id="xqWxErr" style="display:none"></div>' +
+      '<div class="xq-wx-foot">Open-Meteo</div>';
   }
 
   function set(id, text) { var el = document.getElementById(id); if (el) el.textContent = text; }
@@ -1210,7 +1428,7 @@
         dots(his, '#f5a623') + dots(los, '#4d9dff');
     }
     try { localStorage.setItem('xq_wx_cache', JSON.stringify(d)); } catch (e) { /* ignore */ }
-    syncSelect();
+    syncCity();
   }
 
   function renderCache() {
@@ -1257,33 +1475,26 @@
       el.innerHTML = skeleton();
       card = el;
       el.querySelector('#xqWxRefresh').addEventListener('click', load);
-      el.querySelector('#xqWxCity').addEventListener('change', function () {
-        var c = cfg();
-        if (this.value === '__auto') {
-          c.auto = true; c.custom = null; saveCfg(c);
-          set('xqWxCond', '定位中…');
-          locate(function (g) {
-            var c2 = cfg();
-            if (g) { c2.custom = g; } else { c2.auto = false; c2.city = '北京'; }
-            saveCfg(c2); syncSelect(); load();
-          });
-        } else {
-          c.auto = false; c.city = this.value; saveCfg(c);
-          syncSelect(); load();
-        }
+      var gear = el.querySelector('#xqWxGear');
+      if (gear) gear.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        var p = document.getElementById('xqWxCityPanel');
+        if (p) p.hidden = !p.hidden;
       });
-      syncSelect();
+      bindCityControls(el);
+      syncCity();
       tickClock();
       renderCache();
-      if (cfg().auto !== false && !cfg().custom) {
+      if (cfg().custom && cfg().custom.lat != null) {
+        load();
+      } else {
         set('xqWxCond', '定位中…');
         locate(function (g) {
           var c = cfg();
-          if (g) { c.custom = g; } else { c.auto = false; c.city = '北京'; }
-          saveCfg(c); syncSelect(); load();
+          if (g) { c.custom = { name: g.name, lat: g.lat, lon: g.lon, auto: true }; }
+          else { c.auto = false; c.city = '北京'; }
+          saveCfg(c); syncCity(); load();
         });
-      } else {
-        load();
       }
     }
     wrap.appendChild(card);

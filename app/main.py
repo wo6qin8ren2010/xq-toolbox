@@ -26,6 +26,7 @@ from native import seed  # noqa: E402
 from native.paths import log, ui_dir  # noqa: E402
 from native.push import PushBus  # noqa: E402
 from native import sysinfo  # noqa: E402
+from native import music  # noqa: E402
 
 _T_IMPORT = time.perf_counter()
 
@@ -75,6 +76,8 @@ def main() -> None:
     seed.ensure_seed()
     # 系统信息后台采集先跑起来，首屏就有真实数值，不用等子进程
     sysinfo.prime()
+    # 系统音乐会话同样先跑起来，侧栏音乐卡首屏就有内容
+    music.prime()
     bus = PushBus()
     bridge = Bridge(bus)
 

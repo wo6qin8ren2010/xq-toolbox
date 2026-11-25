@@ -3,3 +3,9 @@ pyinstaller>=6.0
 pycaw>=20240210
 comtypes>=1.4.0
 pythonnet>=3.0
+# 系统音乐组件：Windows 媒体会话（SMTC）读取与播放控制
+winrt-runtime>=3.2.1
+winrt-Windows.Foundation>=3.2.1
+winrt-Windows.Foundation.Collections>=3.2.1
+winrt-Windows.Media.Control>=3.2.1
+winrt-Windows.Storage.Streams>=3.2.1

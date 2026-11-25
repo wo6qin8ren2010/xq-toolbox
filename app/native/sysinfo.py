@@ -183,18 +183,3 @@ def snapshot() -> dict:
 
 def as_message() -> str:
     return "system_overview|" + json.dumps(snapshot(), ensure_ascii=False)
-
-
-def monitor_message() -> str:
-    """侧栏实时监控条：只要最精简的字段。"""
-    data = snapshot()
-    payload = {
-        "cpu": round(float(data.get("cpu") or 0.0), 1),
-        "ram": round(float(data.get("ram") or 0.0), 1),
-        "gpu": round(float(data.get("gpuUtilization") or 0.0), 1),
-        "vram": round(float(data.get("gpuMemory") or 0.0), 1),
-        "cpuTemp": data.get("cpuTemp"),
-        "gpuTemp": data.get("gpuTemp"),
-        "gpuName": data.get("gpuName") or "",
-    }
-    return "monitor|" + json.dumps(payload, ensure_ascii=False)

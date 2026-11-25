@@ -14,7 +14,7 @@ import urllib.request
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 
-from . import audio, backup, cloud, config, lestore, library, studio, sysinfo, system_tools, update, vst
+from . import audio, backup, cloud, config, lestore, library, music, studio, sysinfo, system_tools, update, vst
 from .downloads import Downloader
 from .paths import log
 
@@ -324,20 +324,25 @@ class Bridge:
             self._overview_at = now
         return sysinfo.as_message()
 
-    def _cmd_monitor_snapshot(self, args, raw):
-        """侧栏 HUD：实时 CPU / 显卡温度与占用。"""
-        lock = getattr(self, "_monitor_lock", None)
+    def _cmd_music_snapshot(self, args, raw):
+        """侧栏音乐组件：系统正在播放的曲目、进度、歌词与可用控制。"""
+        lock = getattr(self, "_music_lock", None)
         if lock is None:
-            import threading
             lock = threading.Lock()
-            self._monitor_lock = lock
-            self._monitor_at = 0.0
+            self._music_lock = lock
+            self._music_at = 0.0
         with lock:
             now = time.time()
-            if now - getattr(self, "_monitor_at", 0.0) < 0.8:
+            if now - self._music_at < 0.8:
                 return ""
-            self._monitor_at = now
-        return sysinfo.monitor_message()
+            self._music_at = now
+        return music.as_message()
+
+    def _cmd_music_control(self, args, raw):
+        action = (args[0] if args else "").strip()
+        if action not in ("playpause", "next", "prev"):
+            return "music_control_result|%s|badaction" % action
+        return music.control(action)
 
     # ------------------------------------------------------------------
     # 音频

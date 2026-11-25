@@ -49,6 +49,12 @@ jobs:
             '--hidden-import','app.native.library',
             '--hidden-import','app.native.maintenance',
             '--hidden-import','app.native.update',
+            '--hidden-import','app.native.music',
+            '--hidden-import','winrt.system',
+            '--hidden-import','winrt.windows.media.control',
+            '--hidden-import','winrt.windows.storage.streams',
+            '--hidden-import','winrt.windows.foundation',
+            '--hidden-import','winrt.windows.foundation.collections',
             'app\main.py'
           )
           python @params
