@@ -12582,7 +12582,7 @@ function toggleLanguage() {
             var parts = data.split('|');
             var on = parts[1] === '1';
             glassStateKnown = true;
-            if (!cfg) return;
+            if (!cfg) { window.xqGlassPending = on ? 1 : 0; return; }
             cfg.glass = on ? '1' : '';
             sentGlass = null;
             applyGlass();
@@ -13129,30 +13129,23 @@ function toggleLanguage() {
 }
 .xq-skin-picker { margin-bottom: 16px; }
 
-/* ===== 全局磨砂透明背景 =====
-   原生层把窗口设为亚克力模糊 + WebView2 背景透明，这里把大面积背景改成半透明，
-   桌面壁纸就会透过一层高斯模糊显示出来。关闭时完全不影响原外观。 */
+/* ===== 全局磨砂透明背景（小庆魔方方案）=====
+   底图是原生抓的「排除本窗口」整屏快照（#xqWallLayer，已高斯模糊），
+   这里只叠很淡的一层色调 + 半透明卡片，桌面就能明显透出来。
+   注意不透明度会层层叠加：容器层必须很淡，否则底图会被盖死。 */
 :root[data-glass="1"],
 :root[data-glass="1"] body { background: transparent !important; }
 :root[data-glass="1"] .app-container {
-    background: rgba(16, 18, 24, .26) !important;
-    backdrop-filter: blur(30px) saturate(150%);
-    -webkit-backdrop-filter: blur(30px) saturate(150%);
+    background: rgba(16, 18, 24, .20) !important;
 }
 :root[data-glass="1"] .sidebar {
-    background: rgba(16, 18, 24, .20) !important;
-    backdrop-filter: blur(18px) saturate(140%);
-    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    background: rgba(16, 18, 24, .16) !important;
 }
 :root[data-glass="1"] .titlebar {
-    background: rgba(16, 18, 24, .24) !important;
-    backdrop-filter: blur(18px) saturate(140%);
-    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    background: rgba(16, 18, 24, .18) !important;
 }
 :root[data-glass="1"] .content-inner {
-    background: rgba(22, 24, 32, .30) !important;
-    backdrop-filter: blur(22px) saturate(140%);
-    -webkit-backdrop-filter: blur(22px) saturate(140%);
+    background: rgba(22, 24, 32, .08) !important;
 }
 :root[data-glass="1"] .setting-card,
 :root[data-glass="1"] .direct-download-card,
@@ -13163,15 +13156,13 @@ function toggleLanguage() {
 :root[data-glass="1"] .system-overview-panel,
 :root[data-glass="1"] .st-cat-card,
 :root[data-glass="1"] .home-overview-tab-list {
-    background: rgba(28, 31, 41, .38) !important;
-    backdrop-filter: blur(14px) saturate(135%);
-    -webkit-backdrop-filter: blur(14px) saturate(135%);
+    background: rgba(28, 31, 41, .32) !important;
 }
-/* 浅色主题：磨砂改成奶白半透明 */
-:root:not([data-theme="dark"])[data-glass="1"] .app-container { background: rgba(255, 255, 255, .50) !important; }
-:root:not([data-theme="dark"])[data-glass="1"] .sidebar { background: rgba(255, 255, 255, .40) !important; }
-:root:not([data-theme="dark"])[data-glass="1"] .titlebar { background: rgba(255, 255, 255, .44) !important; }
-:root:not([data-theme="dark"])[data-glass="1"] .content-inner { background: rgba(255, 255, 255, .52) !important; }
+/* 浅色主题：奶白淡色调，底图提亮保证深色文字可读 */
+:root:not([data-theme="dark"])[data-glass="1"] .app-container { background: rgba(255, 255, 255, .18) !important; }
+:root:not([data-theme="dark"])[data-glass="1"] .sidebar { background: rgba(255, 255, 255, .42) !important; }
+:root:not([data-theme="dark"])[data-glass="1"] .titlebar { background: rgba(255, 255, 255, .42) !important; }
+:root:not([data-theme="dark"])[data-glass="1"] .content-inner { background: rgba(255, 255, 255, .08) !important; }
 :root:not([data-theme="dark"])[data-glass="1"] .setting-card,
 :root:not([data-theme="dark"])[data-glass="1"] .direct-download-card,
 :root:not([data-theme="dark"])[data-glass="1"] .xq-music,
@@ -13181,7 +13172,7 @@ function toggleLanguage() {
 :root:not([data-theme="dark"])[data-glass="1"] .system-overview-panel,
 :root:not([data-theme="dark"])[data-glass="1"] .st-cat-card,
 :root:not([data-theme="dark"])[data-glass="1"] .home-overview-tab-list {
-    background: rgba(255, 255, 255, .62) !important;
+    background: rgba(255, 255, 255, .40) !important;
 }
 /* 磨砂底图（小庆魔方方案）：原生抓一张「排除本窗口」的整屏快照当底图，
    前端按窗口几何精确对位 + 高斯模糊，面板半透明后就是桌面的真毛玻璃。
@@ -13197,9 +13188,12 @@ function toggleLanguage() {
     background-image: url("../glass_wallpaper.jpg");
     background-size: cover;
     background-position: center;
-    filter: blur(18px) saturate(1.06);
+    filter: blur(22px) saturate(1.08);
     will-change: filter;
 }
+/* 深色主题压暗底图（小庆魔方的"压暗"步骤），浅色提亮，保证文字对比度 */
+:root[data-theme="dark"][data-glass="1"] #xqWallImg { filter: blur(22px) saturate(1.05) brightness(.78); }
+:root:not([data-theme="dark"])[data-glass="1"] #xqWallImg { filter: blur(22px) saturate(1.12) brightness(1.16); }
 </style>
 </body>
 </html>
