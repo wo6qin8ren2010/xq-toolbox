@@ -341,6 +341,12 @@ async def _tick():
 
 def _thread_main():
     global _loop
+    # winrt 首次导入较慢（几百毫秒），放在后台线程，不拖慢主窗口创建
+    try:
+        import winrt.windows.media.control  # noqa: F401
+    except Exception as exc:
+        log("音乐组件", "系统媒体接口不可用：%s" % str(exc)[:80], "警告")
+        return
     loop = asyncio.new_event_loop()
     _loop = loop
     asyncio.set_event_loop(loop)
@@ -354,11 +360,6 @@ def prime() -> None:
     global _worker
     with _worker_lock:
         if _worker is not None:
-            return
-        try:
-            import winrt.windows.media.control  # noqa: F401
-        except Exception as exc:
-            log("音乐组件", "系统媒体接口不可用：%s" % str(exc)[:80], "警告")
             return
         _worker = threading.Thread(target=_thread_main, name="xq-music", daemon=True)
         _worker.start()

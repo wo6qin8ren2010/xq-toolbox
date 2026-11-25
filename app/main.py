@@ -23,12 +23,44 @@ import webview  # noqa: E402
 from native.bridge import Bridge  # noqa: E402
 from native import local_auth  # noqa: E402
 from native import seed  # noqa: E402
-from native.paths import log, ui_dir  # noqa: E402
+from native.paths import data_dir, log, ui_dir  # noqa: E402
 from native.push import PushBus  # noqa: E402
 from native import sysinfo  # noqa: E402
 from native import music  # noqa: E402
 
 _T_IMPORT = time.perf_counter()
+
+_MUTEX_HANDLE = None  # 持有单实例互斥体句柄，进程退出时由系统自动释放
+
+
+def _single_instance() -> bool:
+    """首个实例返回 True；已有实例时把它的窗口带到前台并返回 False。
+
+    持久化 WebView2 profile 后同一用户数据目录不能被两个进程共用，
+    重复打开改为「聚焦已有窗口」，避免第二个实例初始化失败卡住。
+    """
+    global _MUTEX_HANDLE
+    try:
+        k32 = ctypes.windll.kernel32
+        k32.CreateMutexW.restype = ctypes.c_void_p
+        k32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+        _MUTEX_HANDLE = k32.CreateMutexW(None, False, "XQToolbox_SingleInstance_v1")
+        if k32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            try:
+                p = os.path.join(data_dir(), "window.hwnd")
+                if os.path.isfile(p):
+                    with open(p, "r", encoding="utf-8") as fh:
+                        hwnd = int(fh.read().strip() or 0)
+                    u32 = ctypes.windll.user32
+                    if hwnd and u32.IsWindow(hwnd):
+                        u32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                        u32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+            return False
+    except Exception:
+        pass
+    return True
 
 
 def _dpi_aware() -> None:
@@ -71,6 +103,8 @@ def main() -> None:
     if "--admin" in sys.argv:
         _run_admin_mode()
         return
+    if not _single_instance():
+        return
     _dpi_aware()
     local_auth.ensure_default()
     seed.ensure_seed()
@@ -94,6 +128,14 @@ def main() -> None:
     )
     bus.attach(window)
     bridge.attach(window)
+    # pywebview 注入 api 时会递归反射 js_api 的所有属性。Bridge 持有 window，
+    # 反射会爬进 window.native（WinForms/WebView2 对象图），在后台线程跨线程访问
+    # COM 偶发挂起/递归爆栈，导致 api 注入失败、桥永久静默（页面停在「正在读取」）。
+    # 标记 window 不可序列化，注入时直接跳过这棵对象树。
+    try:
+        window._serializable = False
+    except Exception:
+        pass
 
     _glass_prepared = []
 
@@ -107,6 +149,14 @@ def main() -> None:
             ok = glass.prepare(window)
             log("界面", ("磨砂背景已就绪：" if ok else "磨砂背景等待窗口就绪：") + glass.describe(),
                 "信息" if ok else "警告")
+            # 记下主窗口句柄，供重复打开时聚焦已有窗口
+            try:
+                hwnd = glass._handle_of(window) or glass._locate()
+                if hwnd:
+                    with open(os.path.join(data_dir(), "window.hwnd"), "w", encoding="utf-8") as fh:
+                        fh.write(str(hwnd))
+            except Exception:
+                pass
         except Exception as exc:
             log("界面", "磨砂背景初始化失败：%s" % exc, "警告")
 
@@ -127,8 +177,26 @@ def main() -> None:
     log("启动", "启动耗时：解包+导入 %.0f ms，初始化+建窗 %.0f ms" % (
         (_T_IMPORT - _T0) * 1000, (time.perf_counter() - _T_IMPORT) * 1000))
     debug = os.environ.get("MIXER_DEBUG") == "1"
+    # 把 pywebview 内部日志落盘，便于排查偶发的注入/脚本错误
     try:
-        webview.start(debug=debug, func=_after_start)
+        import logging
+        _pvlog = logging.getLogger("pywebview")
+        _pvlog.setLevel(logging.DEBUG)
+        _fh = logging.FileHandler(os.path.join(data_dir(), "webview_debug.log"), encoding="utf-8")
+        _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        _pvlog.addHandler(_fh)
+    except Exception:
+        pass
+    # 持久化 WebView2 用户数据目录：localStorage（自定义文案/皮肤/语言/天气城市等）
+    # 才能跨重启保留；默认 private_mode 是内存 profile，每次启动全部清空。
+    profile = os.path.join(data_dir(), "webview_profile")
+    try:
+        os.makedirs(profile, exist_ok=True)
+    except Exception:
+        profile = None
+    try:
+        webview.start(debug=debug, func=_after_start,
+                      private_mode=profile is None, storage_path=profile)
     finally:
         bridge.shutdown()
 

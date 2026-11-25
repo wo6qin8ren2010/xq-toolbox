@@ -842,9 +842,23 @@
   function postToPython(message) {
     try {
       wakePoll();
-      window.pywebview.api.post_message(message);
+      var p = window.pywebview.api.post_message(message);
+      /* RPC 偶发拒绝（原生侧还没接好）时重排，避免启动竞态丢命令导致页面停在「正在读取」 */
+      if (p && typeof p.catch === 'function') {
+        p.catch(function () { requeue(message); });
+      }
     } catch (e) {
+      requeue(message);
+    }
+  }
+
+  var retryCount = {};
+  function requeue(message) {
+    var n = (retryCount[message] || 0) + 1;
+    retryCount[message] = n;
+    if (n <= 5) {
       queue.push(message);
+      setTimeout(flush, 150);
     }
   }
 
@@ -852,7 +866,10 @@
     if (flushing || !apiReady()) return false;
     flushing = true;
     ready = true;
-    while (queue.length) { postToPython(queue.shift()); }
+    /* 批量快照出队：postToPython 失败会把消息重新入队，
+       若用 while(queue.length) 边出边进会在同步异常时死循环卡死界面 */
+    var batch = queue.splice(0, queue.length);
+    for (var i = 0; i < batch.length; i++) { postToPython(batch[i]); }
     flushing = false;
     return true;
   }
@@ -884,7 +901,38 @@
     }
   };
 
-  var timer = setInterval(function () { if (flush()) { clearInterval(timer); timer = 0; } }, 25);
+  /* pywebview 偶发注入失败（window.pywebview.api 迟迟不出现）时，
+     按原生 RPC 线协议自建一套最小 api，直接走 chrome.webview.postMessage，
+     保证桥不会永久静默。正常注入完成会覆盖它，互不冲突。 */
+  function installFallbackApi() {
+    if (apiReady() || !nativePost) return;
+    var pw = window.pywebview || (window.pywebview = {});
+    pw._returnValuesCallbacks = pw._returnValuesCallbacks || {};
+    pw.api = pw.api || {};
+    function call(funcName, args) {
+      var id = (Math.random() + '').substring(2);
+      var promise = new Promise(function (resolve, reject) {
+        var reg = pw._returnValuesCallbacks[funcName] || (pw._returnValuesCallbacks[funcName] = {});
+        reg[id] = function (ret) {
+          try { delete reg[id]; } catch (e) { /* ignore */ }
+          if (ret && ret.isError) { reject(new Error(String(ret.value))); return; }
+          try { resolve(JSON.parse(ret.value)); } catch (e) { resolve(ret && ret.value); }
+        };
+      });
+      try { nativePost([funcName, JSON.stringify(args), id]); }
+      catch (e) { setTimeout(function () { try { nativePost([funcName, JSON.stringify(args), id]); } catch (e2) { /* ignore */ } }, 200); }
+      return promise;
+    }
+    pw.api.post_message = function (m) { return call('post_message', [m]); };
+    pw.api.poll = function (n) { return call('poll', [n]); };
+    flush();
+    askLockState();
+    wakePoll();
+  }
+  setTimeout(installFallbackApi, 1200);
+  setTimeout(installFallbackApi, 3000);
+
+  var timer = setInterval(function () { if (flush() && !queue.length) { clearInterval(timer); timer = 0; } }, 25);
 
   // 启动时问一次本机密码状态：已启用则通知页面进入上锁状态
   var lockAsked = false;
