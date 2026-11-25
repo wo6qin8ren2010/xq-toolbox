@@ -37,6 +37,11 @@ class Bridge:
         self._pool = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="bridge")
         self._overview_at = 0.0
         self._overview_lock = threading.Lock()
+        try:
+            from . import autostart
+            autostart.heal()   # 已开启自启动时，把启动项纠正为当前 exe 路径
+        except Exception:
+            pass
         self._started = False
         self._lock_announced = False
         self._first_cmd = False
@@ -348,6 +353,22 @@ class Bridge:
         ok, note = dock.launch(path)
         log("界面", note, "信息" if ok else "警告")
         return "dock_notice|" + note
+
+    # ------------------------------------------------------------------
+    # 开机自启动（全局设置页）
+    # ------------------------------------------------------------------
+    def _cmd_autostart_state(self, args, raw):
+        from . import autostart
+        return "autostart_state|" + ("1" if autostart.is_enabled() else "0")
+
+    def _cmd_autostart_set(self, args, raw):
+        from . import autostart
+        on = (args[0].strip() if args else "") in ("1", "on", "true")
+        ok = autostart.set_enabled(on)
+        log("界面", "开机自启动：%s%s" % ("已开启" if on else "已关闭",
+                                          "" if ok else "（写入失败）"),
+            "信息" if ok else "警告")
+        return "autostart_state|" + ("1" if autostart.is_enabled() else "0")
 
     def _cmd_user_click(self, args, raw):
         action = args[0] if args else ""

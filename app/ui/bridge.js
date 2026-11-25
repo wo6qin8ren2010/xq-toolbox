@@ -144,6 +144,16 @@
       libNotice(s.slice('dock_notice|'.length));
       return true;
     }
+    if (s.indexOf('autostart_state|') === 0) {
+      var asOn = s.slice('autostart_state|'.length) === '1';
+      var asBox = document.getElementById('xqAutostart');
+      if (asBox) asBox.checked = asOn;
+      var asHint = document.getElementById('xqAutostartHint');
+      if (asHint) asHint.textContent = asOn
+        ? '已开启：登录 Windows 后自动运行小庆工具箱。'
+        : '已关闭：开机不会自动运行。';
+      return true;
+    }
     return false;
   }
 
@@ -735,6 +745,8 @@
     return false;
   }
   window.xqUpdRefresh = function () { postCommand('update_state'); };
+  window.xqAutostartRefresh = function () { postCommand('autostart_state'); };
+  window.xqAutostartSet = function (on) { postCommand('autostart_set|' + (on ? '1' : '0')); };
   window.xqUpdSave = function () {
     var b = document.getElementById('xqUpdBase');
     var a = document.getElementById('xqUpdAuto');

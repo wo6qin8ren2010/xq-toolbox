@@ -11028,6 +11028,19 @@ function loadCategory(index, isRefreshOnly = false) {
                             </div>
                         </div>
                         <div class="setting-group-container">
+                            <div class="setting-group-title">开机自启动</div>
+                            <div class="setting-card group-item" style="flex-direction: column; align-items: stretch; gap: 12px;">
+                                <div class="setting-info" style="display: block;">
+                                    <div class="setting-titleText">登录 Windows 时自动运行</div>
+                                    <div class="direct-download-subtitle" style="margin-top: 6px;">写入当前用户的启动项，开机登录后自动打开小庆工具箱；关闭即移除，不需要管理员权限。</div>
+                                </div>
+                                <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--color-text-secondary);cursor:pointer;">
+                                    <input id="xqAutostart" type="checkbox" style="accent-color:#2f86f6;" onchange="window.xqAutostartSet(this.checked)">开机时自动启动小庆工具箱
+                                </label>
+                                <div class="direct-download-subtitle" id="xqAutostartHint"></div>
+                            </div>
+                        </div>
+                        <div class="setting-group-container">
                             <div class="setting-group-title">软件更新</div>
                             <div class="setting-card group-item" style="flex-direction: column; align-items: stretch; gap: 12px;">
                                 <div class="setting-info" style="display: block;">
@@ -11060,6 +11073,7 @@ function loadCategory(index, isRefreshOnly = false) {
                 if (typeof renderDirectDownloadProgress === 'function') renderDirectDownloadProgress();
                 if (window.xqPasswordRefresh) window.xqPasswordRefresh();
                 if (window.xqUpdRefresh) window.xqUpdRefresh();
+                if (window.xqAutostartRefresh) window.xqAutostartRefresh();
                 if (window.XQ_DEV) window.XQ_DEV.mount();
             } else if (category.type === 'downloads_page') {
                 pageHeaderWrap.style.display = 'flex';
