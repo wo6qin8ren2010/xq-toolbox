@@ -249,6 +249,19 @@ class Bridge:
         log("界面", "语言切换：%s" % (args[0] if args else "zh"))
         return ""
 
+    def _cmd_set_window_title(self, args, raw):
+        """自定义窗口标题（任务栏 / 系统标题），参数为 base64 文本。"""
+        title = self._b64_arg(args[0] if args else "").strip()[:80]
+        if not title:
+            return ""
+        try:
+            if self.window:
+                self.window.set_title(title)
+            log("界面", "窗口标题已更新：%s" % title)
+        except Exception as exc:
+            log("界面", "设置窗口标题失败：%s" % exc, "警告")
+        return ""
+
     def _cmd_user_click(self, args, raw):
         action = args[0] if args else ""
         target = "|".join(args[1:])

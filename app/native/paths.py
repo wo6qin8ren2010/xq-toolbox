@@ -20,6 +20,15 @@ def app_root() -> str:
 
 
 def ui_dir() -> str:
+    """界面资源目录。
+
+    打包后优先使用 exe 同目录下的 ui 文件夹（便于直接改界面文字，重启即生效），
+    该目录不存在时回退到 exe 内置的界面资源。
+    """
+    if getattr(sys, "frozen", False):
+        outer = os.path.join(os.path.dirname(sys.executable), "ui")
+        if os.path.isdir(outer) and os.path.isfile(os.path.join(outer, "index.html")):
+            return outer
     return os.path.join(app_root(), "ui")
 
 

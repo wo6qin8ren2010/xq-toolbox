@@ -7704,8 +7704,42 @@ function renderUserOperationLogs() {
             };
             if (!profileAppended) appendProfile();
         }
+        /* ===== 主题配色模板（皮肤）===== */
+        const XQ_SKINS = {
+            blue:   { name: '蓝色', dot: 'linear-gradient(150deg,#8ecbff,#0078d4)' },
+            violet: { name: '极夜紫', dot: 'linear-gradient(150deg,#c9b6ff,#7c5cff)' },
+            forest: { name: '森野绿', dot: 'linear-gradient(150deg,#a4f3c1,#16a34a)' },
+            sand:   { name: '暖沙棕', dot: 'linear-gradient(150deg,#f8d9a8,#b9752e)' },
+            cyber:  { name: '赛博青', dot: 'linear-gradient(150deg,#a6f4fa,#0e9aa8)' }
+        };
+        function getSkin() {
+            try {
+                const v = localStorage.getItem('xq_skin');
+                return XQ_SKINS[v] ? v : 'blue';
+            } catch (e) { return 'blue'; }
+        }
+        function applySkin(key) {
+            const skin = XQ_SKINS[key] ? key : 'blue';
+            document.documentElement.dataset.skin = skin;
+            return skin;
+        }
+        function renderSkinPickerHtml() {
+            const cur = getSkin();
+            return Object.keys(XQ_SKINS).map(k => {
+                const s = XQ_SKINS[k];
+                return '<button type="button" class="xq-skin-dot' + (k === cur ? ' is-active' : '') + '" data-skin-key="' + k + '" title="' + s.name + '" style="background:' + s.dot + '" onclick="onSkinChange(\'' + k + '\')"><span>' + s.name + '</span></button>';
+            }).join('');
+        }
+        function onSkinChange(key) {
+            const skin = applySkin(key);
+            try { localStorage.setItem('xq_skin', skin); } catch (e) {}
+            const picker = document.getElementById('xqSkinPicker');
+            if (picker) picker.innerHTML = renderSkinPickerHtml();
+        }
+
         function initApp() {
             currentLang = 'zh';
+            applySkin(getSkin());
             sendMessageToCpp('set_language|zh');
             // Bind the configured title URL during startup. Without this,
             // the title remains non-interactive and the drag region consumes
@@ -10874,6 +10908,12 @@ function loadCategory(index, isRefreshOnly = false) {
                         </div>
                         <div class="setting-card">
                             <div class="setting-info">
+                                <div class="setting-titleText">主题配色</div>
+                            </div>
+                            <div class="xq-skin-picker" id="xqSkinPicker">${renderSkinPickerHtml()}</div>
+                        </div>
+                        <div class="setting-card">
+                            <div class="setting-info">
                                 <div class="setting-titleText">${i18n[currentLang].sNavPosition}</div>
                             </div>
                             <div class="setting-radio-group">
@@ -10994,11 +11034,16 @@ function loadCategory(index, isRefreshOnly = false) {
                                 <div class="direct-download-subtitle">发布新版：把新 exe 与 version.json 上传到同一目录（清单含 version / file / sha256 / notes）。更新包校验失败不会改动现有程序；更新设置保存在本机 更新设置.json。</div>
                             </div>
                         </div>
+                        <div class="setting-group-container">
+                            <div class="setting-group-title">管理员开发选项</div>
+                            <div class="setting-card group-item" id="xqDevSlot" style="flex-direction:column; align-items:stretch; gap:12px;"></div>
+                        </div>
                     </div>
                 `;
                 if (typeof renderDirectDownloadProgress === 'function') renderDirectDownloadProgress();
                 if (window.xqPasswordRefresh) window.xqPasswordRefresh();
                 if (window.xqUpdRefresh) window.xqUpdRefresh();
+                if (window.XQ_DEV) window.XQ_DEV.mount();
             } else if (category.type === 'downloads_page') {
                 pageHeaderWrap.style.display = 'flex';
                 document.getElementById('openFolderBtn').style.display = 'flex';
@@ -12293,6 +12338,321 @@ function toggleLanguage() {
 
 </script>
 <script>
+/* 管理员开发选项：密码解锁后可自定义窗口标题、界面文案与外观（保存在本机，重启自动套用） */
+(function () {
+    var CFG_KEY = 'xq_dev_cfg';
+    var PASS_KEY = 'xq_dev_pass';
+    var DEFAULT_PASS = 'wo6qin8ren';
+    var NAV_ORDER = ['首页', '软件下载', '日常维护', '调试工具', '小庆自用', '全局设置'];
+    var NAV_EN = { '首页': 'Home', '软件下载': 'Downloads', '日常维护': 'Maintenance', '调试工具': 'Dev Tools', '小庆自用': 'My Library', '全局设置': 'Settings' };
+    var TABS_DEFAULT = [['系统概述', 'OVERVIEW'], ['音频设置', 'AUDIO'], ['音频设备', 'DEVICES'], ['系统命令', 'COMMANDS']];
+    var THEME_ACCENT = '#2f86f6';
+
+    var cfg = null;
+    var unlocked = false;
+    var sentTitle = '';
+    var mo = null;
+    var moTimer = null;
+
+    function b64(text) {
+        try { return btoa(unescape(encodeURIComponent(text))); } catch (e) { return ''; }
+    }
+    function defaults() {
+        var d = { title: '', user: '', musicHead: '', scale: 100, accent: '' };
+        for (var i = 0; i < NAV_ORDER.length; i++) { d['nav' + i] = ''; d['navEn' + i] = ''; }
+        for (var j = 0; j < 4; j++) { d['tab' + j] = ''; d['tabEn' + j] = ''; }
+        return d;
+    }
+    function readCfg() {
+        var d = defaults();
+        try {
+            var raw = localStorage.getItem(CFG_KEY);
+            if (raw) {
+                var p = JSON.parse(raw) || {};
+                Object.keys(d).forEach(function (k) {
+                    if (typeof p[k] === 'string' || typeof p[k] === 'number') d[k] = p[k];
+                });
+            }
+        } catch (e) { /* ignore */ }
+        return d;
+    }
+    function getPass() {
+        try { return localStorage.getItem(PASS_KEY) || DEFAULT_PASS; } catch (e) { return DEFAULT_PASS; }
+    }
+    function hint(text, ok) {
+        var el = document.getElementById('xqDevHint');
+        if (!el) return;
+        el.textContent = text || '';
+        el.style.color = ok ? 'var(--color-accent)' : '#e0553d';
+    }
+    function setNodeText(node, text) {
+        if (!node) return;
+        for (var i = 0; i < node.childNodes.length; i++) {
+            var c = node.childNodes[i];
+            if (c.nodeType === 3 && c.nodeValue.trim()) {
+                if (c.nodeValue !== text) c.nodeValue = text;
+                return;
+            }
+        }
+        if ((node.textContent || '').trim() !== text) node.appendChild(document.createTextNode(text));
+    }
+
+    function applyNav() {
+        if (!cfg) return;
+        var items = document.querySelectorAll('#sidebar .nav-item');
+        for (var i = 0; i < items.length; i++) {
+            var n = items[i];
+            if (n.classList.contains('nav-separator')) continue;
+            var base = n.getAttribute('data-xq-base');
+            if (!base) {
+                var cur = (n.textContent || '').trim();
+                if (NAV_ORDER.indexOf(cur) < 0) continue;
+                base = cur;
+                n.setAttribute('data-xq-base', base);
+            }
+            var idx = NAV_ORDER.indexOf(base);
+            if (idx < 0) continue;
+            var zh = (cfg['nav' + idx] || '').trim() || base;
+            var en = (cfg['navEn' + idx] || '').trim() || NAV_EN[base] || '';
+            setNodeText(n, zh);
+            if (n.getAttribute('data-en') !== en) n.setAttribute('data-en', en);
+        }
+        var uname = document.querySelector('.sidebar-username');
+        if (uname) {
+            var u = (cfg.user || '').trim() || '小庆';
+            if ((uname.textContent || '').trim() !== u) uname.textContent = u;
+        }
+    }
+
+    function applyTabs() {
+        if (!cfg) return;
+        var tabs = document.querySelectorAll('.home-overview-tab');
+        for (var i = 0; i < tabs.length && i < 4; i++) {
+            var zh = (cfg['tab' + i] || '').trim();
+            var en = (cfg['tabEn' + i] || '').trim();
+            var zt = tabs[i].querySelector('.zt');
+            var ze = tabs[i].querySelector('.ze');
+            if (zt && zh && zt.textContent !== zh) zt.textContent = zh;
+            if (ze && en && ze.textContent !== en) ze.textContent = en;
+        }
+    }
+
+    function applyMusic() {
+        if (!cfg) return;
+        var head = document.querySelector('#xqMusic .xq-mu-head > span');
+        var zh = (cfg.musicHead || '').trim();
+        if (head && zh && head.textContent !== zh) head.textContent = zh;
+    }
+
+    function applyLook() {
+        if (!cfg) return;
+        var scale = parseInt(cfg.scale, 10);
+        if (!scale || scale < 80 || scale > 140) scale = 100;
+        document.documentElement.style.zoom = (scale === 100) ? '' : String(scale / 100);
+        var accent = (cfg.accent || '').trim();
+        if (accent && accent !== THEME_ACCENT) document.documentElement.style.setProperty('--color-accent', accent);
+        else document.documentElement.style.removeProperty('--color-accent');
+    }
+
+    function applyAll() {
+        if (!cfg) cfg = readCfg();
+        var title = (cfg.title || '').trim() || '小庆工具箱';
+        if (document.title !== title) document.title = title;
+        var bar = document.getElementById('clientTitleBar');
+        if (bar && (bar.textContent || '').trim() !== title) bar.textContent = title;
+        if ((cfg.title || '').trim() && sentTitle !== cfg.title) {
+            sentTitle = cfg.title;
+            try {
+                if (typeof sendMessageToCpp === 'function') sendMessageToCpp('set_window_title|' + b64(cfg.title));
+            } catch (e) { /* ignore */ }
+        }
+        applyNav();
+        applyTabs();
+        applyMusic();
+        applyLook();
+    }
+
+    function fieldRow(label, key, ph, type) {
+        return '<label style="display:flex;align-items:center;gap:10px;">' +
+            '<span style="flex:0 0 96px;font-size:12.5px;color:var(--color-text-secondary);">' + label + '</span>' +
+            '<input id="xqDev_' + key + '" class="direct-download-input" type="' + (type || 'text') + '" style="flex:1 1 auto;width:100%;min-width:120px;" placeholder="' + ph + '">' +
+            '</label>';
+    }
+    function pairRow(label, keyZh, phZh, keyEn, phEn) {
+        return '<div style="display:flex;gap:8px;align-items:center;">' +
+            '<span style="flex:0 0 96px;font-size:12.5px;color:var(--color-text-secondary);">' + label + '</span>' +
+            '<input id="xqDev_' + keyZh + '" class="direct-download-input" type="text" style="flex:1 1 0;width:100%;min-width:80px;" placeholder="' + phZh + '">' +
+            '<input id="xqDev_' + keyEn + '" class="direct-download-input" type="text" style="flex:1 1 0;width:100%;min-width:80px;" placeholder="' + phEn + '">' +
+            '</div>';
+    }
+    function section(title, body, open) {
+        return '<details' + (open ? ' open' : '') + ' style="border:1px solid rgba(47,134,246,.14);border-radius:12px;padding:10px 12px;">' +
+            '<summary style="cursor:pointer;font-size:13px;font-weight:600;">' + title + '</summary>' +
+            '<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">' + body + '</div>' +
+            '</details>';
+    }
+
+    function gateHtml() {
+        return '<div class="setting-info" style="display:block;">' +
+            '<div class="setting-titleText">管理员开发选项</div>' +
+            '<div class="direct-download-subtitle" style="margin-top:6px;">自定义窗口标题、界面文案与外观，需要管理员密码。</div>' +
+            '</div>' +
+            '<div class="direct-download-fields">' +
+            '<input id="xqDevPass" class="direct-download-input" type="password" maxlength="64" autocomplete="off" placeholder="管理员密码">' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">' +
+            '<button type="button" class="direct-download-button" onclick="window.XQ_DEV.unlock()">解锁</button>' +
+            '</div>' +
+            '<div class="direct-download-subtitle" id="xqDevHint"></div>';
+    }
+
+    function panelHtml() {
+        var navRows = '';
+        NAV_ORDER.forEach(function (base, i) {
+            navRows += pairRow(base, 'nav' + i, base, 'navEn' + i, NAV_EN[base] || '');
+        });
+        var tabRows = '';
+        for (var i = 0; i < 4; i++) {
+            tabRows += pairRow('标签 ' + (i + 1), 'tab' + i, TABS_DEFAULT[i][0], 'tabEn' + i, TABS_DEFAULT[i][1]);
+        }
+        var h = '';
+        h += '<div class="setting-info" style="display:block;">' +
+            '<div class="setting-titleText">已解锁 · 自定义外观与文案</div>' +
+            '<div class="direct-download-subtitle" style="margin-top:6px;">改动只保存在本机，重启后自动套用；留空即使用默认文案。</div>' +
+            '</div>';
+        h += section('窗口与标识', fieldRow('窗口标题', 'title', '小庆工具箱') +
+            fieldRow('侧栏用户名', 'user', '小庆') +
+            fieldRow('音乐卡标题', 'musicHead', '音乐'), true);
+        h += section('侧栏导航（中文 / 英文）', navRows);
+        h += section('首页标签页（中文 / 英文）', tabRows);
+        h += section('界面外观',
+            '<label style="display:flex;align-items:center;gap:10px;">' +
+            '<span style="flex:0 0 96px;font-size:12.5px;color:var(--color-text-secondary);">界面缩放</span>' +
+            '<input id="xqDev_scale" class="direct-download-input" type="number" min="80" max="140" step="5" style="flex:1;min-width:0;" placeholder="100">' +
+            '<span style="font-size:12px;color:var(--color-text-secondary);">%</span></label>' +
+            '<label style="display:flex;align-items:center;gap:10px;">' +
+            '<span style="flex:0 0 96px;font-size:12.5px;color:var(--color-text-secondary);">主题强调色</span>' +
+            '<input id="xqDev_accent" type="color" style="width:52px;height:30px;border:0;background:none;padding:0;cursor:pointer;">' +
+            '<span style="font-size:12px;color:var(--color-text-secondary);">默认 #2f86f6</span></label>');
+        h += section('管理员密码',
+            '<div class="direct-download-fields">' +
+            '<input id="xqDevPassNew" class="direct-download-input" type="password" maxlength="64" autocomplete="off" placeholder="新管理员密码（留空不改）">' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+            '<button type="button" class="direct-download-button" onclick="window.XQ_DEV.savePass()">修改密码</button>' +
+            '</div>');
+        h += '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">' +
+            '<button type="button" class="direct-download-button" onclick="window.XQ_DEV.reset()">恢复默认</button>' +
+            '<button type="button" class="direct-download-button" onclick="window.XQ_DEV.save()">保存并应用</button>' +
+            '<button type="button" class="direct-download-button" onclick="window.XQ_DEV.lock()">锁定</button>' +
+            '</div>' +
+            '<div class="direct-download-subtitle" id="xqDevHint"></div>';
+        return h;
+    }
+
+    function fill() {
+        if (!cfg) cfg = readCfg();
+        var set = function (key, val) {
+            var el = document.getElementById('xqDev_' + key);
+            if (el) el.value = val == null ? '' : val;
+        };
+        set('title', cfg.title);
+        set('user', cfg.user);
+        set('musicHead', cfg.musicHead);
+        for (var i = 0; i < NAV_ORDER.length; i++) { set('nav' + i, cfg['nav' + i]); set('navEn' + i, cfg['navEn' + i]); }
+        for (var j = 0; j < 4; j++) { set('tab' + j, cfg['tab' + j]); set('tabEn' + j, cfg['tabEn' + j]); }
+        set('scale', String(parseInt(cfg.scale, 10) || 100));
+        var acc = document.getElementById('xqDev_accent');
+        if (acc) acc.value = (cfg.accent && cfg.accent !== THEME_ACCENT) ? cfg.accent : THEME_ACCENT;
+    }
+
+    function collect() {
+        var c = readCfg();
+        var get = function (key) {
+            var el = document.getElementById('xqDev_' + key);
+            return el ? String(el.value || '').trim() : '';
+        };
+        c.title = get('title');
+        c.user = get('user');
+        c.musicHead = get('musicHead');
+        for (var i = 0; i < NAV_ORDER.length; i++) { c['nav' + i] = get('nav' + i); c['navEn' + i] = get('navEn' + i); }
+        for (var j = 0; j < 4; j++) { c['tab' + j] = get('tab' + j); c['tabEn' + j] = get('tabEn' + j); }
+        c.scale = Math.max(80, Math.min(140, parseInt(get('scale'), 10) || 100));
+        var acc = document.getElementById('xqDev_accent');
+        c.accent = (acc && acc.value && acc.value.toLowerCase() !== THEME_ACCENT) ? acc.value : '';
+        return c;
+    }
+
+    function mount() {
+        var slot = document.getElementById('xqDevSlot');
+        if (!slot) return;
+        slot.innerHTML = unlocked ? panelHtml() : gateHtml();
+        if (unlocked) fill();
+    }
+
+    function watchContent() {
+        var box = document.getElementById('contentContainer') || document.querySelector('.content-inner');
+        if (!box || !window.MutationObserver) return;
+        if (mo) mo.disconnect();
+        mo = new MutationObserver(function () {
+            if (moTimer) clearTimeout(moTimer);
+            moTimer = setTimeout(function () { applyTabs(); applyMusic(); }, 150);
+        });
+        mo.observe(box, { childList: true, subtree: true });
+    }
+
+    window.XQ_DEV = {
+        mount: mount,
+        applyNav: applyNav,
+        applyAll: applyAll,
+        unlock: function () {
+            var el = document.getElementById('xqDevPass');
+            var val = el ? String(el.value || '') : '';
+            if (val && val === getPass()) {
+                unlocked = true;
+                mount();
+                hint('已解锁，可修改下列项目', true);
+            } else {
+                hint('密码不对，请重试');
+            }
+        },
+        lock: function () {
+            unlocked = false;
+            mount();
+        },
+        save: function () {
+            cfg = collect();
+            try { localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); } catch (e) { /* ignore */ }
+            sentTitle = '';
+            applyAll();
+            hint('已保存并应用，重启后依然生效', true);
+        },
+        reset: function () {
+            cfg = defaults();
+            try { localStorage.removeItem(CFG_KEY); } catch (e) { /* ignore */ }
+            sentTitle = '';
+            applyAll();
+            mount();
+            hint('已恢复默认文案与外观', true);
+        },
+        savePass: function () {
+            var el = document.getElementById('xqDevPassNew');
+            var val = el ? String(el.value || '').trim() : '';
+            if (val.length < 4) { hint('新密码至少 4 位'); return; }
+            try { localStorage.setItem(PASS_KEY, val); } catch (e) { /* ignore */ }
+            if (el) el.value = '';
+            hint('管理员密码已更新', true);
+        }
+    };
+
+    cfg = readCfg();
+    applyAll();
+    watchContent();
+    setTimeout(function () { applyAll(); watchContent(); }, 600);
+    setTimeout(function () { applyAll(); }, 2000);
+})();
+</script>
+<script>
 /* v12：给侧栏每个导航项前置一枚线性小图标（按栏目名匹配），配合居中胶囊样式 */
 (function () {
     var ICONS = {
@@ -12328,6 +12688,7 @@ function toggleLanguage() {
             span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[label] || ICONS._default) + '</svg>';
             n.insertBefore(span, n.firstChild);
         }
+        if (window.XQ_DEV && window.XQ_DEV.applyNav) window.XQ_DEV.applyNav();
     }
     decorate();
     var sb = document.getElementById('sidebar');
@@ -12336,5 +12697,246 @@ function toggleLanguage() {
     }
 })();
 </script>
+<style>
+/* ===== 主题配色模板（皮肤层）=====
+   思路：只覆盖“承载面积最大”的关键面，其余交给 --color-accent / --card-bg /
+   --border-color / --bg-active 等既有令牌继承，避免逐条复制深色覆盖规则。
+   blue = 现状默认，不写规则。 */
+:root[data-skin]:not([data-skin="blue"]) .sidebar { background: var(--skin-sidebar) !important; }
+:root[data-skin]:not([data-skin="blue"]) .titlebar { background: var(--skin-titlebar) !important; }
+:root[data-skin]:not([data-skin="blue"]) .content-area { background: var(--skin-content) !important; }
+:root[data-skin]:not([data-skin="blue"]) .content-inner {
+    background: var(--skin-panel) !important;
+    border-color: var(--skin-card-line) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .nav-item.active {
+    background: var(--skin-nav-active) !important;
+    color: var(--skin-accent) !important;
+    box-shadow: inset 0 0 0 1px var(--skin-card-line) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .nav-item.active::before {
+    background: linear-gradient(180deg, var(--skin-accent-light), var(--skin-accent)) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .home-overview-tab.is-active,
+:root[data-skin]:not([data-skin="blue"]) .home-overview-tab[aria-selected="true"] {
+    background: var(--skin-tab-active) !important;
+    color: var(--skin-accent) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .setting-card,
+:root[data-skin]:not([data-skin="blue"]) .direct-download-card,
+:root[data-skin]:not([data-skin="blue"]) .xq-music,
+:root[data-skin]:not([data-skin="blue"]) .xq-wx-embed,
+:root[data-skin]:not([data-skin="blue"]) .home-audio-card,
+:root[data-skin]:not([data-skin="blue"]) .mic-lock-card,
+:root[data-skin]:not([data-skin="blue"]) .system-overview-panel {
+    background: var(--skin-card) !important;
+    border-color: var(--skin-card-line) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .direct-download-input,
+:root[data-skin]:not([data-skin="blue"]) .category-search-input,
+:root[data-skin]:not([data-skin="blue"]) .settings-select,
+:root[data-skin]:not([data-skin="blue"]) .audio-lock-select {
+    background: var(--skin-input) !important;
+    border-color: var(--skin-card-line) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .direct-download-button,
+:root[data-skin]:not([data-skin="blue"]) .advanced-optimize-btn {
+    background: var(--skin-btn) !important;
+    color: #fff !important;
+    border-color: transparent !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .xq-mu-bar i,
+:root[data-skin]:not([data-skin="blue"]) .direct-download-progress-bar,
+:root[data-skin]:not([data-skin="blue"]) .system-stat-bar i {
+    background: var(--skin-bar) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .xq-mu-ctrl button.is-primary {
+    background: var(--skin-btn) !important;
+    color: #fff !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .xq-mu-art.has-cover {
+    box-shadow: 0 3px 10px rgba(0, 0, 0, .35), inset 0 0 0 1px var(--skin-card-line) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .qr-dialog-content {
+    background: var(--skin-card) !important;
+    border-color: var(--skin-card-line) !important;
+}
+
+/* ---------- 深色：极夜紫 ---------- */
+:root[data-theme="dark"][data-skin="violet"] {
+    --color-accent: #a184ff; --border-color: rgba(161, 132, 255, .20);
+    --bg-active: rgba(161, 132, 255, .20); --card-bg: #241d38;
+    --skin-accent: #a184ff; --skin-accent-light: #c9b6ff;
+    --skin-sidebar: rgba(23, 19, 37, .94); --skin-titlebar: rgba(26, 21, 42, .96);
+    --skin-content: #171327; --skin-panel: linear-gradient(135deg, rgba(58, 47, 92, .92), rgba(31, 25, 54, .92));
+    --skin-card: rgba(45, 37, 70, .82); --skin-card-line: rgba(161, 132, 255, .20);
+    --skin-tab-active: rgba(161, 132, 255, .22);
+    --skin-nav-active: linear-gradient(100deg, rgba(161, 132, 255, .26), rgba(161, 132, 255, .08));
+    --skin-btn: linear-gradient(150deg, #b39dff, #7c5cff);
+    --skin-input: rgba(32, 26, 52, .92); --skin-bar: linear-gradient(90deg, #c9b6ff, #7c5cff);
+}
+/* ---------- 浅色：极夜紫 ---------- */
+:root:not([data-theme="dark"])[data-skin="violet"] {
+    --color-accent: #7c5cff; --border-color: rgba(124, 92, 255, .20);
+    --bg-active: rgba(124, 92, 255, .12); --card-bg: #ffffff;
+    --skin-accent: #7c5cff; --skin-accent-light: #a78bfa;
+    --skin-sidebar: rgba(249, 246, 255, .92); --skin-titlebar: rgba(252, 249, 255, .96);
+    --skin-content: #f8f4ff; --skin-panel: linear-gradient(135deg, rgba(244, 237, 255, .95), rgba(229, 218, 251, .92));
+    --skin-card: rgba(255, 255, 255, .92); --skin-card-line: rgba(124, 92, 255, .18);
+    --skin-tab-active: rgba(124, 92, 255, .14);
+    --skin-nav-active: linear-gradient(100deg, rgba(124, 92, 255, .16), rgba(124, 92, 255, .05));
+    --skin-btn: linear-gradient(150deg, #a78bfa, #7c5cff);
+    --skin-input: rgba(255, 255, 255, .94); --skin-bar: linear-gradient(90deg, #a78bfa, #7c5cff);
+}
+/* ---------- 深色：森野绿 ---------- */
+:root[data-theme="dark"][data-skin="forest"] {
+    --color-accent: #4ade80; --border-color: rgba(74, 222, 128, .20);
+    --bg-active: rgba(74, 222, 128, .18); --card-bg: #1b2f24;
+    --skin-accent: #4ade80; --skin-accent-light: #86efac;
+    --skin-sidebar: rgba(18, 30, 23, .94); --skin-titlebar: rgba(20, 34, 26, .96);
+    --skin-content: #131f19; --skin-panel: linear-gradient(135deg, rgba(38, 66, 50, .92), rgba(22, 36, 28, .92));
+    --skin-card: rgba(30, 54, 41, .82); --skin-card-line: rgba(74, 222, 128, .18);
+    --skin-tab-active: rgba(74, 222, 128, .18);
+    --skin-nav-active: linear-gradient(100deg, rgba(74, 222, 128, .20), rgba(74, 222, 128, .06));
+    --skin-btn: linear-gradient(150deg, #86efac, #16a34a);
+    --skin-input: rgba(24, 42, 32, .92); --skin-bar: linear-gradient(90deg, #86efac, #22a06b);
+}
+/* ---------- 浅色：森野绿 ---------- */
+:root:not([data-theme="dark"])[data-skin="forest"] {
+    --color-accent: #16a34a; --border-color: rgba(22, 163, 74, .20);
+    --bg-active: rgba(22, 163, 74, .10); --card-bg: #ffffff;
+    --skin-accent: #16a34a; --skin-accent-light: #4ade80;
+    --skin-sidebar: rgba(247, 252, 249, .92); --skin-titlebar: rgba(250, 254, 251, .96);
+    --skin-content: #f4fbf6; --skin-panel: linear-gradient(135deg, rgba(235, 250, 241, .95), rgba(214, 244, 227, .92));
+    --skin-card: rgba(255, 255, 255, .92); --skin-card-line: rgba(22, 163, 74, .16);
+    --skin-tab-active: rgba(22, 163, 74, .12);
+    --skin-nav-active: linear-gradient(100deg, rgba(22, 163, 74, .14), rgba(22, 163, 74, .04));
+    --skin-btn: linear-gradient(150deg, #4ade80, #15803d);
+    --skin-input: rgba(255, 255, 255, .94); --skin-bar: linear-gradient(90deg, #4ade80, #16a34a);
+}
+/* ---------- 深色：暖沙棕 ---------- */
+:root[data-theme="dark"][data-skin="sand"] {
+    --color-accent: #e5a85c; --border-color: rgba(229, 168, 92, .22);
+    --bg-active: rgba(229, 168, 92, .18); --card-bg: #2f2620;
+    --skin-accent: #e5a85c; --skin-accent-light: #f5cd96;
+    --skin-sidebar: rgba(28, 24, 19, .94); --skin-titlebar: rgba(31, 27, 21, .96);
+    --skin-content: #211b15; --skin-panel: linear-gradient(135deg, rgba(68, 54, 40, .92), rgba(38, 31, 24, .92));
+    --skin-card: rgba(52, 43, 34, .84); --skin-card-line: rgba(229, 168, 92, .18);
+    --skin-tab-active: rgba(229, 168, 92, .18);
+    --skin-nav-active: linear-gradient(100deg, rgba(229, 168, 92, .20), rgba(229, 168, 92, .06));
+    --skin-btn: linear-gradient(150deg, #f5cd96, #b9752e);
+    --skin-input: rgba(40, 34, 27, .92); --skin-bar: linear-gradient(90deg, #f5cd96, #c07d34);
+}
+/* ---------- 浅色：暖沙棕 ---------- */
+:root:not([data-theme="dark"])[data-skin="sand"] {
+    --color-accent: #b9752e; --border-color: rgba(185, 117, 46, .20);
+    --bg-active: rgba(185, 117, 46, .10); --card-bg: #ffffff;
+    --skin-accent: #b9752e; --skin-accent-light: #e5a85c;
+    --skin-sidebar: rgba(253, 250, 245, .92); --skin-titlebar: rgba(254, 252, 248, .96);
+    --skin-content: #fbf6ef; --skin-panel: linear-gradient(135deg, rgba(252, 244, 232, .95), rgba(246, 231, 210, .92));
+    --skin-card: rgba(255, 255, 255, .92); --skin-card-line: rgba(185, 117, 46, .16);
+    --skin-tab-active: rgba(185, 117, 46, .12);
+    --skin-nav-active: linear-gradient(100deg, rgba(185, 117, 46, .14), rgba(185, 117, 46, .04));
+    --skin-btn: linear-gradient(150deg, #e5a85c, #a4691f);
+    --skin-input: rgba(255, 255, 255, .94); --skin-bar: linear-gradient(90deg, #e5a85c, #b9752e);
+}
+/* ---------- 深色：赛博青 ---------- */
+:root[data-theme="dark"][data-skin="cyber"] {
+    --color-accent: #35d6e6; --border-color: rgba(53, 214, 230, .20);
+    --bg-active: rgba(53, 214, 230, .18); --card-bg: #163033;
+    --skin-accent: #35d6e6; --skin-accent-light: #86eff7;
+    --skin-sidebar: rgba(15, 30, 33, .94); --skin-titlebar: rgba(17, 34, 37, .96);
+    --skin-content: #101f22; --skin-panel: linear-gradient(135deg, rgba(30, 66, 70, .92), rgba(18, 38, 41, .92));
+    --skin-card: rgba(24, 52, 56, .84); --skin-card-line: rgba(53, 214, 230, .18);
+    --skin-tab-active: rgba(53, 214, 230, .18);
+    --skin-nav-active: linear-gradient(100deg, rgba(53, 214, 230, .20), rgba(53, 214, 230, .06));
+    --skin-btn: linear-gradient(150deg, #86eff7, #0e9aa8);
+    --skin-input: rgba(20, 42, 46, .92); --skin-bar: linear-gradient(90deg, #86eff7, #12b0c0);
+}
+/* ---------- 浅色：赛博青 ---------- */
+:root:not([data-theme="dark"])[data-skin="cyber"] {
+    --color-accent: #0e9aa8; --border-color: rgba(14, 154, 168, .20);
+    --bg-active: rgba(14, 154, 168, .10); --card-bg: #ffffff;
+    --skin-accent: #0e9aa8; --skin-accent-light: #35d6e6;
+    --skin-sidebar: rgba(246, 253, 253, .92); --skin-titlebar: rgba(250, 254, 254, .96);
+    --skin-content: #f2fbfb; --skin-panel: linear-gradient(135deg, rgba(232, 250, 251, .95), rgba(209, 243, 245, .92));
+    --skin-card: rgba(255, 255, 255, .92); --skin-card-line: rgba(14, 154, 168, .16);
+    --skin-tab-active: rgba(14, 154, 168, .12);
+    --skin-nav-active: linear-gradient(100deg, rgba(14, 154, 168, .14), rgba(14, 154, 168, .04));
+    --skin-btn: linear-gradient(150deg, #35d6e6, #0b7f8b);
+    --skin-input: rgba(255, 255, 255, .94); --skin-bar: linear-gradient(90deg, #35d6e6, #0e9aa8);
+}
+
+/* 残留蓝色元素：tab 条外框、内部分隔、滚动条、天气/信息分栏描边 */
+:root[data-skin]:not([data-skin="blue"]) .home-overview-tab-list {
+    background: var(--skin-card) !important;
+    border-color: var(--skin-card-line) !important;
+    box-shadow: none !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .home-overview-tab-list > * {
+    border-color: transparent !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .home-overview-tab.is-active {
+    border-bottom: 2px solid var(--skin-accent) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) #contentContainer::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--skin-accent) 30%, transparent) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .system-info-box,
+:root[data-skin]:not([data-skin="blue"]) .xq-ov-split,
+:root[data-skin]:not([data-skin="blue"]) .xq-wx,
+:root[data-skin]:not([data-skin="blue"]) .xq-wx-tile,
+:root[data-skin]:not([data-skin="blue"]) .xq-wx-day,
+:root[data-skin]:not([data-skin="blue"]) .xq-wx-chip,
+:root[data-skin]:not([data-skin="blue"]) .sys-info-row {
+    border-color: var(--skin-card-line) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .system-overview-time,
+:root[data-skin]:not([data-skin="blue"]) .xq-mu-src,
+:root[data-skin]:not([data-skin="blue"]) .xq-mu-lyric {
+    color: var(--skin-accent) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .setting-group-title {
+    color: var(--color-text-secondary) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .st-cat-card {
+    background: var(--skin-card) !important;
+    border-color: var(--skin-card-line) !important;
+    box-shadow: none !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .st-cat-card.is-active {
+    background: var(--skin-tab-active) !important;
+    border-color: var(--skin-accent) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .st-cat-card::after,
+:root[data-skin]:not([data-skin="blue"]) .st-cat-card.is-active::before {
+    background: linear-gradient(180deg, var(--skin-accent-light), var(--skin-accent)) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .system-tool-button {
+    background: var(--skin-input) !important;
+    border-color: var(--skin-card-line) !important;
+    box-shadow: none !important;
+    color: var(--color-text-primary) !important;
+}
+:root[data-skin]:not([data-skin="blue"]) .system-tool-button:hover {
+    background: var(--skin-tab-active) !important;
+    border-color: var(--skin-accent) !important;
+}
+
+/* 色卡选择器 */
+.xq-skin-picker { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.xq-skin-dot {
+    width: 40px; height: 40px; border-radius: 12px; cursor: pointer;
+    border: 2px solid transparent; position: relative; padding: 0;
+    transition: transform .15s ease, box-shadow .15s ease;
+}
+.xq-skin-dot:hover { transform: translateY(-1px); }
+.xq-skin-dot.is-active { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent); border-color: #fff; }
+.xq-skin-dot span {
+    position: absolute; left: 0; right: 0; bottom: -18px; text-align: center;
+    font-size: 11px; color: var(--color-text-secondary); white-space: nowrap;
+}
+.xq-skin-picker { margin-bottom: 16px; }
+</style>
 </body>
 </html>
