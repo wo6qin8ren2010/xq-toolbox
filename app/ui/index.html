@@ -5525,6 +5525,16 @@
     <script>
 // WebView2 boundary. Keep native message formatting out of feature modules.
 let nativeBridgeWarningShown = false;
+/* 页面脚本出错时把错误回传给原生日志，方便排查（不弹窗、不影响用户） */
+window.addEventListener('error', function (e) {
+    try {
+        if (!e.message) return; /* 资源加载失败没有 message，不回传 */
+        var info = (e.message || '') + ' @' + String(e.filename || '').split('/').pop() + ':' + (e.lineno || 0);
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.postMessage('ui_error|' + encodeURIComponent(info));
+        }
+    } catch (x) { /* ignore */ }
+}, true);
 function sendMessageToCpp(message) {
     if (window.chrome && window.chrome.webview) {
         window.chrome.webview.postMessage(message);
@@ -12359,6 +12369,7 @@ function toggleLanguage() {
     var unlocked = false;
     var sentTitle = '';
     var sentGlass = null;
+    var glassStateKnown = false;   /* 是否已从原生侧取回过磨砂状态 */
     var mo = null;
     var moTimer = null;
 
@@ -12495,13 +12506,51 @@ function toggleLanguage() {
         });
     }
 
+    /* ---- 磨砂底图：把桌面壁纸铺在窗口下方并模糊 ---- */
+    function xqEnsureWallLayer() {
+        var box = document.getElementById('xqWallLayer');
+        if (box) return box;
+        box = document.createElement('div');
+        box.id = 'xqWallLayer';
+        var img = document.createElement('div');
+        img.id = 'xqWallImg';
+        box.appendChild(img);
+        if (document.body.firstChild) document.body.insertBefore(box, document.body.firstChild);
+        else document.body.appendChild(box);
+        return box;
+    }
+
+    function xqApplyWallData(data) {
+        if (!data || !data.ok) return;
+        var img = document.getElementById('xqWallImg');
+        if (!img || !data.src) return;
+        /* 有精确底图时按屏幕坐标对齐，比 cover 更贴合真实桌面 */
+        img.style.backgroundImage = 'url("' + data.src + '")';
+        img.style.backgroundSize = 'cover';
+    }
+
+    function xqRefreshWall() {
+        if (!cfg || String(cfg.glass || '') !== '1') return;
+        xqEnsureWallLayer();
+        var img = document.getElementById('xqWallImg');
+        /* 加时间戳避免"文件还没生成时加载失败被缓存"的问题 */
+        if (img) img.style.backgroundImage = 'url("../glass_wallpaper.jpg?t=' + Date.now() + '")';
+    }
+
     function applyGlass() {
         if (!cfg) return;
         var on = String(cfg.glass || '') === '1';
-        if (on) document.documentElement.setAttribute('data-glass', '1');
-        else document.documentElement.removeAttribute('data-glass');
+        if (on) {
+            document.documentElement.setAttribute('data-glass', '1');
+            xqRefreshWall();
+        } else {
+            document.documentElement.removeAttribute('data-glass');
+        }
         var theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
         var key = on ? ('1|' + theme) : '0';
+        var localSet = String(cfg.glass || '') !== '';
+        /* 状态还没和原生侧对齐、本地又没设置过时先别下发，避免把上次开的磨砂覆盖成关 */
+        if (!glassStateKnown && !localSet) return;
         if (sentGlass !== key) {
             sentGlass = key;
             try {
@@ -12509,6 +12558,45 @@ function toggleLanguage() {
             } catch (e) { /* ignore */ }
         }
     }
+
+    window.chrome && window.chrome.webview && window.chrome.webview.addEventListener('message', function (ev) {
+        var data = ev && ev.data;
+        if (typeof data !== 'string') return;
+        if (data.indexOf('glass_wall|') === 0) {
+            try { xqApplyWallData(JSON.parse(data.substring('glass_wall|'.length))); } catch (e) { /* ignore */ }
+        } else if (data.indexOf('glass_state|') === 0) {
+            /* 原生侧记住的状态优先，避免换电脑/清缓存后状态对不上 */
+            var parts = data.split('|');
+            var on = parts[1] === '1';
+            glassStateKnown = true;
+            if (!cfg) return;
+            cfg.glass = on ? '1' : '';
+            sentGlass = null;
+            applyGlass();
+        } else if (data === 'glass_move') {
+            xqRefreshWall();
+        }
+    });
+    /* 原生侧注入入口：窗口一建好就把记住的磨砂状态带过来 */
+    window.xqGlassBoot = function (on) {
+        glassStateKnown = true;
+        if (!cfg) { window.xqGlassPending = on ? 1 : 0; return; }
+        cfg.glass = on ? '1' : '';
+        sentGlass = null;
+        applyGlass();
+    };
+
+    var glassStateTries = 0;
+    function xqAskGlassState() {
+        if (glassStateKnown || glassStateTries >= 6) return;
+        glassStateTries++;
+        try {
+            if (typeof sendMessageToCpp === 'function') sendMessageToCpp('glass_state');
+        } catch (e) { /* ignore */ }
+        setTimeout(xqAskGlassState, 1200);
+    }
+    setTimeout(xqAskGlassState, 200);
+    window.addEventListener('resize', function () { if (cfg && String(cfg.glass || '') === '1') xqRefreshWall(); });
 
     function applyAll() {
         if (!cfg) cfg = readCfg();
@@ -12527,7 +12615,15 @@ function toggleLanguage() {
         applyMusic();
         applyLook();
         applyMarquee();
+        if (window.xqGlassPending !== undefined) {
+            var pendingGlass = window.xqGlassPending;
+            delete window.xqGlassPending;
+            cfg.glass = pendingGlass ? '1' : '';
+            sentGlass = null;
+        }
         applyGlass();
+        /* 原生桥可能比前端晚就绪，稍后再补发一次，避免启动时静默丢失 */
+        setTimeout(function () { sentGlass = null; applyGlass(); }, 1200);
     }
 
     function fieldRow(label, key, ph, type) {
@@ -13069,6 +13165,22 @@ function toggleLanguage() {
 :root:not([data-theme="dark"])[data-glass="1"] .st-cat-card,
 :root:not([data-theme="dark"])[data-glass="1"] .home-overview-tab-list {
     background: rgba(255, 255, 255, .62) !important;
+}
+/* 磨砂底图：把当前桌面壁纸按屏幕尺寸铺在本窗口下方，再整体高斯模糊，
+   面板半透明后就能看到"桌面壁纸的毛玻璃"。 */
+#xqWallLayer {
+    position: fixed; left: 0; top: 0; right: 0; bottom: 0;
+    overflow: hidden; pointer-events: none; z-index: -1; display: none;
+    background: #10121a;
+}
+:root[data-glass="1"] #xqWallLayer { display: block; }
+#xqWallImg {
+    position: absolute; left: -8%; top: -8%; width: 116%; height: 116%;
+    background-image: url("../glass_wallpaper.jpg");
+    background-size: cover;
+    background-position: center;
+    filter: blur(18px) saturate(1.06);
+    will-change: filter;
 }
 </style>
 </body>

@@ -95,12 +95,17 @@ def main() -> None:
     bus.attach(window)
     bridge.attach(window)
 
+    _glass_prepared = []
+
     def _prepare_glass(*_args):
-        # 窗口句柄 + WebView2 控件就绪后才能开磨砂
+        # 只做一次：缓存句柄 + 生成壁纸糊图。磨砂状态由前端 glass_state 请求对齐。
+        if _glass_prepared:
+            return
+        _glass_prepared.append(1)
         try:
             from native import glass
             ok = glass.prepare(window)
-            log("界面", "磨砂背景已就绪" if ok else "磨砂背景等待窗口就绪",
+            log("界面", ("磨砂背景已就绪：" if ok else "磨砂背景等待窗口就绪：") + glass.describe(),
                 "信息" if ok else "警告")
         except Exception as exc:
             log("界面", "磨砂背景初始化失败：%s" % exc, "警告")

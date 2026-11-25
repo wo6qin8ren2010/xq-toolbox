@@ -212,6 +212,37 @@ class Bridge:
                            actual.left, actual.top, bool(ok)))
             time.sleep(0.008)
         log("窗口", "标题栏拖动结束")
+        self.bus.push("glass_move")
+
+    def _cmd_glass_wall(self, args, raw):
+        """磨砂底图：把当前桌面壁纸画成屏幕大小的模糊底图，并给出窗口几何。"""
+        try:
+            from . import glass
+            return "glass_wall|" + glass.payload()
+        except Exception as exc:
+            log("界面", "取磨砂壁纸失败：%s" % exc, "警告")
+            return ""
+
+    def _cmd_glass_state(self, args, raw):
+        """磨砂的持久状态（原生侧是唯一真相，前端启动时用来对齐）。"""
+        try:
+            from . import glass
+            payload = "glass_state|%s|%s" % ("1" if glass.is_enabled() else "0",
+                                            "light" if glass.is_light() else "dark")
+            log("界面", "回传磨砂状态：%s" % payload)
+            return payload
+        except Exception as exc:
+            log("界面", "回传磨砂状态失败：%s" % exc, "警告")
+            return ""
+
+    def _cmd_ui_error(self, args, raw):
+        """页面脚本异常回传，只写日志，不上报、不打扰用户。"""
+        try:
+            from urllib.parse import unquote
+            log("界面", "页面脚本异常：%s" % unquote("|".join(args))[:400], "错误")
+        except Exception:
+            pass
+        return ""
 
     def _cmd_minimize(self, args, raw):
         if self.window:
@@ -269,8 +300,9 @@ class Bridge:
         try:
             from . import glass
             ok = glass.set_enabled(on, light)
-            log("界面", "磨砂背景：%s" % ("开（%s）" % ("浅色" if light else "深色") if on else "关"),
-                "信息" if ok else "警告")
+            log("界面", "磨砂背景：%s（%s）" % (
+                "开（%s）" % ("浅色" if light else "深色") if on else "关",
+                glass.describe()), "信息" if ok else "警告")
         except Exception as exc:
             log("界面", "磨砂背景切换失败：%s" % exc, "警告")
         return ""
