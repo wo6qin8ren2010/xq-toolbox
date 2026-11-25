@@ -135,6 +135,15 @@
       postCommand('local_password_lock_state');
       return true;
     }
+    if (s.indexOf('dock_list|') === 0) {
+      try { dockPayload = JSON.parse(s.slice('dock_list|'.length)); } catch (e) { dockPayload = null; }
+      if (window.xqLibActive && libPayload) renderLibrary(null);
+      return true;
+    }
+    if (s.indexOf('dock_notice|') === 0) {
+      libNotice(s.slice('dock_notice|'.length));
+      return true;
+    }
     return false;
   }
 
@@ -190,6 +199,7 @@
   }
 
   var libPayload = null;
+  var dockPayload = null;   // 软件 Dock：固定文件夹扫描 + 手动添加 + 点击启动
   var libLocked = null;   // null=未知；true=需要输入查看密码
   var libExpanded = {};   // 项目卡片里「包含软件 / 链接」是否展开，默认收起
   var adminUnlocked = false;   // 本次会话是否已通过网页后台入口密码
@@ -352,8 +362,9 @@
 
     if (!software.length && !projects.length) {
       mount.innerHTML = head + '<div style="padding:16px 2px;color:' + libMuted() + ';font-size:13px">' +
-        '自建库还是空的：点「打开网页后台」添加软件和项目，保存后回到这里点「刷新」。</div>';
+        '自建库还是空的：点「打开网页后台」添加软件和项目，保存后回到这里点「刷新」。</div>' + dockHtml();
       bindLibraryButtons(mount, byId);
+      bindDock(mount);
       return;
     }
 
@@ -412,8 +423,9 @@
       html += '</div>';
     }
 
-    mount.innerHTML = html;
+    mount.innerHTML = html + dockHtml();
     bindLibraryButtons(mount, byId);
+    bindDock(mount);
   }
 
   function libStartDownload(item) {
@@ -469,6 +481,105 @@
     });
     var refreshBtn = container.querySelector('[data-lib-refresh]');
     if (refreshBtn) refreshBtn.addEventListener('click', function () { postCommand('my_library'); });
+  }
+
+  /* ---- 软件 Dock：卡片下方空白处的启动栏 ---- */
+  function ensureDockStyle() {
+    if (document.getElementById('xqDockStyle')) return;
+    var st = document.createElement('style');
+    st.id = 'xqDockStyle';
+    st.textContent =
+      '.xqDockTile{position:relative;width:84px;padding:10px 4px 8px;border-radius:14px;text-align:center;' +
+        'cursor:pointer;transition:transform .15s ease,background .15s ease,box-shadow .15s ease;user-select:none}' +
+      '.xqDockTile:hover{transform:translateY(-4px)}' +
+      ':root:not([data-theme="dark"]) .xqDockTile:hover{background:rgba(255,255,255,.7);box-shadow:0 8px 18px rgba(46,98,160,.16)}' +
+      ':root[data-theme="dark"] .xqDockTile:hover{background:rgba(255,255,255,.10)}' +
+      '.xqDockTile:active{transform:translateY(-1px) scale(.97)}' +
+      '.xqDockName{font-size:11px;margin-top:6px;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      ':root:not([data-theme="dark"]) .xqDockName{color:#16304d}' +
+      ':root[data-theme="dark"] .xqDockName{color:#e8eef7}' +
+      '.xqDockDel{position:absolute;top:2px;right:4px;width:16px;height:16px;line-height:15px;border-radius:8px;' +
+        'font-size:12px;color:#fff;background:rgba(120,140,165,.75);opacity:0;transition:opacity .12s}' +
+      '.xqDockTile:hover .xqDockDel{opacity:1}' +
+      '.xqDockDel:hover{background:#e05656}' +
+      '.xqDockIco{width:42px;height:42px;margin:0 auto}' +
+      '.xqDockIco .xqDockLetter{display:none}' +
+      '.xqDockIco.noimg img{display:none}' +
+      '.xqDockIco.noimg .xqDockLetter{display:flex}' +
+      '.xqDockFolderInput{flex:1;min-width:160px;border-radius:9px;padding:6px 10px;font-size:12px;outline:none}' +
+      ':root:not([data-theme="dark"]) .xqDockFolderInput{border:1px solid rgba(96,142,198,.35);background:rgba(255,255,255,.8);color:#16304d}' +
+      ':root[data-theme="dark"] .xqDockFolderInput{border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#e8eef7}';
+    document.head.appendChild(st);
+  }
+
+  function dockTile(item) {
+    var path = escHtml(item.path || '');
+    var letter = '<div class="xqDockLetter" style="' + LIB_STYLE.icon.replace('display:flex', '') + 'width:42px;height:42px;margin:0 auto">' +
+      escHtml(String(item.name || '?').slice(0, 1)) + '</div>';
+    var icon = '<div class="xqDockIco' + (item.icon ? '' : ' noimg') + '">' +
+      (item.icon ? '<img src="' + escHtml(item.icon) + '" style="width:42px;height:42px;object-fit:contain;filter:drop-shadow(0 3px 6px rgba(20,40,80,.18))" onerror="this.parentNode.classList.add(\'noimg\')">' : '') +
+      letter + '</div>';
+    var miss = item.missing ? 'opacity:.45;' : '';
+    return '<div class="xqDockTile" data-dock-run="' + path + '" style="' + miss + '" title="' + path + '">' +
+      '<span class="xqDockDel" data-dock-del="' + path + '" title="从 Dock 移除">×</span>' +
+      icon +
+      '<div class="xqDockName">' + escHtml(item.name || '') + '</div>' +
+    '</div>';
+  }
+
+  function dockHtml() {
+    ensureDockStyle();
+    var data = dockPayload || { folder: '', items: [] };
+    var items = data.items || [];
+    var tiles = items.length
+      ? '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px">' + items.map(dockTile).join('') + '</div>'
+      : '<div style="margin-top:12px;font-size:12.5px;color:' + libMuted() + '">' +
+        'Dock 还是空的：点「一键刷新」自动添加扫描文件夹里的所有软件，或点「添加软件」手动选择。</div>';
+    return '<div style="' + LIB_STYLE.card + 'margin-top:18px">' +
+      '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+        '<span style="font-size:15px;font-weight:700">软件 Dock</span>' +
+        '<span style="' + LIB_STYLE.meta + '">' + items.length + ' 个 · 点击图标启动</span>' +
+        '<div style="flex:1"></div>' +
+        '<button style="' + LIB_STYLE.btn + '" data-dock-scan="1">一键刷新</button>' +
+        '<button style="' + LIB_STYLE.btnGhost + '" data-dock-add="1">添加软件</button>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap">' +
+        '<span style="' + LIB_STYLE.meta + 'flex:none">扫描文件夹</span>' +
+        '<input id="xqDockFolder" class="xqDockFolderInput" type="text" spellcheck="false" value="' + escHtml(data.folder || '') + '" placeholder="例如 E:\\黑科技\\绿色版">' +
+        '<button style="' + LIB_STYLE.btnGhost + '" data-dock-folder-save="1">保存</button>' +
+      '</div>' +
+      tiles +
+    '</div>';
+  }
+
+  function bindDock(container) {
+    var scan = container.querySelector('[data-dock-scan]');
+    if (scan) scan.addEventListener('click', function () {
+      libNotice('正在扫描文件夹…');
+      postCommand('dock_scan');
+    });
+    var add = container.querySelector('[data-dock-add]');
+    if (add) add.addEventListener('click', function () { postCommand('dock_add|'); });
+    var save = container.querySelector('[data-dock-folder-save]');
+    var input = container.querySelector('#xqDockFolder');
+    function saveFolder() {
+      if (!input) return;
+      postCommand('dock_folder|' + b64(input.value || ''));
+      libNotice('扫描文件夹已保存，点「一键刷新」生效');
+    }
+    if (save) save.addEventListener('click', saveFolder);
+    if (input) input.addEventListener('keydown', function (e) { if (e.key === 'Enter') saveFolder(); });
+    container.querySelectorAll('[data-dock-run]').forEach(function (tile) {
+      tile.addEventListener('click', function () {
+        postCommand('dock_launch|' + b64(tile.getAttribute('data-dock-run') || ''));
+      });
+    });
+    container.querySelectorAll('[data-dock-del]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        postCommand('dock_remove|' + b64(btn.getAttribute('data-dock-del') || ''));
+      });
+    });
   }
 
   function closeAdminGate() {
@@ -697,6 +808,7 @@
     }
     if (libPayload) renderLibrary(null);
     else postCommand('my_library');
+    postCommand('dock_list');
   };
 
   // 点其它侧栏项时退出“小庆自用”页面状态，避免解锁后误跳回

@@ -307,6 +307,48 @@ class Bridge:
             log("界面", "磨砂背景切换失败：%s" % exc, "警告")
         return ""
 
+    # ------------------------------------------------------------------
+    # 软件 Dock（小庆自用页）
+    # ------------------------------------------------------------------
+    def _cmd_dock_list(self, args, raw):
+        from . import dock
+        return "dock_list|" + json.dumps(dock.list_payload(), ensure_ascii=False)
+
+    def _cmd_dock_scan(self, args, raw):
+        from . import dock
+        payload = dock.scan()
+        log("界面", "Dock 一键刷新：%d 个软件（文件夹 %s）" % (len(payload["items"]), payload["folder"]))
+        return "dock_list|" + json.dumps(payload, ensure_ascii=False)
+
+    def _cmd_dock_add(self, args, raw):
+        from . import dock
+        path = self._b64_arg(args[0]) if args and args[0] else dock.pick_exe()
+        if not path:
+            return ""
+        payload = dock.add(path)
+        log("界面", "Dock 添加软件：%s" % path)
+        return "dock_list|" + json.dumps(payload, ensure_ascii=False)
+
+    def _cmd_dock_remove(self, args, raw):
+        from . import dock
+        path = self._b64_arg(args[0]) if args else ""
+        payload = dock.remove(path)
+        return "dock_list|" + json.dumps(payload, ensure_ascii=False)
+
+    def _cmd_dock_folder(self, args, raw):
+        from . import dock
+        path = self._b64_arg(args[0]) if args else ""
+        payload = dock.set_folder(path)
+        log("界面", "Dock 扫描文件夹改为：%s" % payload["folder"])
+        return "dock_list|" + json.dumps(payload, ensure_ascii=False)
+
+    def _cmd_dock_launch(self, args, raw):
+        from . import dock
+        path = self._b64_arg(args[0]) if args else ""
+        ok, note = dock.launch(path)
+        log("界面", note, "信息" if ok else "警告")
+        return "dock_notice|" + note
+
     def _cmd_user_click(self, args, raw):
         action = args[0] if args else ""
         target = "|".join(args[1:])
