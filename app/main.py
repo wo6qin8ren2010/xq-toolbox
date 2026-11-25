@@ -94,12 +94,36 @@ def main() -> None:
     )
     bus.attach(window)
     bridge.attach(window)
+
+    def _prepare_glass(*_args):
+        # 窗口句柄 + WebView2 控件就绪后才能开磨砂
+        try:
+            from native import glass
+            ok = glass.prepare(window)
+            log("界面", "磨砂背景已就绪" if ok else "磨砂背景等待窗口就绪",
+                "信息" if ok else "警告")
+        except Exception as exc:
+            log("界面", "磨砂背景初始化失败：%s" % exc, "警告")
+
+    try:
+        window.events.loaded += _prepare_glass
+    except Exception as exc:
+        log("界面", "挂接页面加载事件失败：%s" % exc, "警告")
+
+    try:
+        window.events.shown += _prepare_glass
+    except Exception:
+        pass
+
+    def _after_start():
+        _prepare_glass()
+
     log("启动", "小庆工具箱 已启动")
     log("启动", "启动耗时：解包+导入 %.0f ms，初始化+建窗 %.0f ms" % (
         (_T_IMPORT - _T0) * 1000, (time.perf_counter() - _T_IMPORT) * 1000))
     debug = os.environ.get("MIXER_DEBUG") == "1"
     try:
-        webview.start(debug=debug)
+        webview.start(debug=debug, func=_after_start)
     finally:
         bridge.shutdown()
 

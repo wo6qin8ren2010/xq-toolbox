@@ -3390,6 +3390,13 @@
             animation: xq-marquee-hue 7s linear infinite;
         }
         .xq-marquee.is-static .xq-marquee-track { transform: none; }
+        .xq-marquee.is-scrolling .xq-marquee-track {
+            animation: xq-marquee-scroll var(--xq-marquee-dur, 18s) linear infinite;
+        }
+        @keyframes xq-marquee-scroll {
+            from { transform: translate3d(0, 0, 0); }
+            to { transform: translate3d(-50%, 0, 0); }
+        }
         @keyframes xq-marquee-hue {
             from { background-position: 0% 50%; }
             to { background-position: 200% 50%; }
@@ -12351,6 +12358,7 @@ function toggleLanguage() {
     var cfg = null;
     var unlocked = false;
     var sentTitle = '';
+    var sentGlass = null;
     var mo = null;
     var moTimer = null;
 
@@ -12358,7 +12366,7 @@ function toggleLanguage() {
         try { return btoa(unescape(encodeURIComponent(text))); } catch (e) { return ''; }
     }
     function defaults() {
-        var d = { title: '', user: '', musicHead: '', scale: 100, accent: '' };
+        var d = { title: '', user: '', musicHead: '', scale: 100, accent: '', marquee: '', glass: '' };
         for (var i = 0; i < NAV_ORDER.length; i++) { d['nav' + i] = ''; d['navEn' + i] = ''; }
         for (var j = 0; j < 4; j++) { d['tab' + j] = ''; d['tabEn' + j] = ''; }
         return d;
@@ -12454,6 +12462,54 @@ function toggleLanguage() {
         else document.documentElement.style.removeProperty('--color-accent');
     }
 
+    function applyMarquee() {
+        if (!cfg) return;
+        var box = document.getElementById('xqMarquee');
+        var track = document.getElementById('xqMarqueeTrack');
+        var a = document.getElementById('xqMarqueeChunkA');
+        var b = document.getElementById('xqMarqueeChunkB');
+        if (!box || !track || !a || !b) return;
+        var text = (cfg.marquee || '').trim();
+        if (!text) {
+            box.style.display = 'none';
+            box.classList.remove('is-scrolling', 'is-static');
+            if (a.textContent) a.textContent = '';
+            if (b.textContent) b.textContent = '';
+            return;
+        }
+        box.style.display = '';
+        var unit = text + '　　　•　　　';
+        if (a.textContent !== unit) a.textContent = unit;
+        if (b.textContent !== unit) b.textContent = unit;
+        requestAnimationFrame(function () {
+            var w = a.scrollWidth;
+            var boxW = box.clientWidth;
+            if (w > boxW + 4) {
+                track.style.setProperty('--xq-marquee-dur', Math.max(9, Math.round(w / 36)) + 's');
+                box.classList.add('is-scrolling');
+                box.classList.remove('is-static');
+            } else {
+                box.classList.remove('is-scrolling');
+                box.classList.add('is-static');
+            }
+        });
+    }
+
+    function applyGlass() {
+        if (!cfg) return;
+        var on = String(cfg.glass || '') === '1';
+        if (on) document.documentElement.setAttribute('data-glass', '1');
+        else document.documentElement.removeAttribute('data-glass');
+        var theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        var key = on ? ('1|' + theme) : '0';
+        if (sentGlass !== key) {
+            sentGlass = key;
+            try {
+                if (typeof sendMessageToCpp === 'function') sendMessageToCpp('set_glass|' + key);
+            } catch (e) { /* ignore */ }
+        }
+    }
+
     function applyAll() {
         if (!cfg) cfg = readCfg();
         var title = (cfg.title || '').trim() || '小庆工具箱';
@@ -12470,6 +12526,8 @@ function toggleLanguage() {
         applyTabs();
         applyMusic();
         applyLook();
+        applyMarquee();
+        applyGlass();
     }
 
     function fieldRow(label, key, ph, type) {
@@ -12523,6 +12581,11 @@ function toggleLanguage() {
         h += section('窗口与标识', fieldRow('窗口标题', 'title', '小庆工具箱') +
             fieldRow('侧栏用户名', 'user', '小庆') +
             fieldRow('音乐卡标题', 'musicHead', '音乐'), true);
+        h += section('顶部滚动字幕',
+            '<div class="direct-download-fields">' +
+            '<input id="xqDev_marquee" class="direct-download-input" type="text" maxlength="120" style="width:100%;" placeholder="留空则隐藏，例如：小庆工具箱 · 欢迎回来">' +
+            '</div>' +
+            '<div class="direct-download-subtitle">彩色渐变文字，显示在标题栏右侧；比窗口宽时自动横向滚动。</div>');
         h += section('侧栏导航（中文 / 英文）', navRows);
         h += section('首页标签页（中文 / 英文）', tabRows);
         h += section('界面外观',
@@ -12533,7 +12596,11 @@ function toggleLanguage() {
             '<label style="display:flex;align-items:center;gap:10px;">' +
             '<span style="flex:0 0 96px;font-size:12.5px;color:var(--color-text-secondary);">主题强调色</span>' +
             '<input id="xqDev_accent" type="color" style="width:52px;height:30px;border:0;background:none;padding:0;cursor:pointer;">' +
-            '<span style="font-size:12px;color:var(--color-text-secondary);">默认 #2f86f6</span></label>');
+            '<span style="font-size:12px;color:var(--color-text-secondary);">默认 #2f86f6</span></label>' +
+            '<label style="display:flex;align-items:center;gap:10px;">' +
+            '<span style="flex:0 0 96px;font-size:12.5px;color:var(--color-text-secondary);">磨砂透明背景</span>' +
+            '<input id="xqDev_glass" type="checkbox" style="width:18px;height:18px;cursor:pointer;">' +
+            '<span style="font-size:12px;color:var(--color-text-secondary);">透出桌面壁纸的高斯模糊</span></label>');
         h += section('管理员密码',
             '<div class="direct-download-fields">' +
             '<input id="xqDevPassNew" class="direct-download-input" type="password" maxlength="64" autocomplete="off" placeholder="新管理员密码（留空不改）">' +
@@ -12559,6 +12626,9 @@ function toggleLanguage() {
         set('title', cfg.title);
         set('user', cfg.user);
         set('musicHead', cfg.musicHead);
+        set('marquee', cfg.marquee);
+        var gl = document.getElementById('xqDev_glass');
+        if (gl) gl.checked = String(cfg.glass || '') === '1';
         for (var i = 0; i < NAV_ORDER.length; i++) { set('nav' + i, cfg['nav' + i]); set('navEn' + i, cfg['navEn' + i]); }
         for (var j = 0; j < 4; j++) { set('tab' + j, cfg['tab' + j]); set('tabEn' + j, cfg['tabEn' + j]); }
         set('scale', String(parseInt(cfg.scale, 10) || 100));
@@ -12575,6 +12645,9 @@ function toggleLanguage() {
         c.title = get('title');
         c.user = get('user');
         c.musicHead = get('musicHead');
+        c.marquee = get('marquee');
+        var gl = document.getElementById('xqDev_glass');
+        c.glass = (gl && gl.checked) ? '1' : '';
         for (var i = 0; i < NAV_ORDER.length; i++) { c['nav' + i] = get('nav' + i); c['navEn' + i] = get('navEn' + i); }
         for (var j = 0; j < 4; j++) { c['tab' + j] = get('tab' + j); c['tabEn' + j] = get('tabEn' + j); }
         c.scale = Math.max(80, Math.min(140, parseInt(get('scale'), 10) || 100));
@@ -12647,6 +12720,11 @@ function toggleLanguage() {
 
     cfg = readCfg();
     applyAll();
+    // 明暗切换后重算磨砂色调（深色冷灰 / 浅色乳白）
+    try {
+        new MutationObserver(function () { applyGlass(); })
+            .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    } catch (e) { /* ignore */ }
     watchContent();
     setTimeout(function () { applyAll(); watchContent(); }, 600);
     setTimeout(function () { applyAll(); }, 2000);
@@ -12937,6 +13015,61 @@ function toggleLanguage() {
     font-size: 11px; color: var(--color-text-secondary); white-space: nowrap;
 }
 .xq-skin-picker { margin-bottom: 16px; }
+
+/* ===== 全局磨砂透明背景 =====
+   原生层把窗口设为亚克力模糊 + WebView2 背景透明，这里把大面积背景改成半透明，
+   桌面壁纸就会透过一层高斯模糊显示出来。关闭时完全不影响原外观。 */
+:root[data-glass="1"],
+:root[data-glass="1"] body { background: transparent !important; }
+:root[data-glass="1"] .app-container {
+    background: rgba(16, 18, 24, .26) !important;
+    backdrop-filter: blur(30px) saturate(150%);
+    -webkit-backdrop-filter: blur(30px) saturate(150%);
+}
+:root[data-glass="1"] .sidebar {
+    background: rgba(16, 18, 24, .20) !important;
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+:root[data-glass="1"] .titlebar {
+    background: rgba(16, 18, 24, .24) !important;
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+:root[data-glass="1"] .content-inner {
+    background: rgba(22, 24, 32, .30) !important;
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
+}
+:root[data-glass="1"] .setting-card,
+:root[data-glass="1"] .direct-download-card,
+:root[data-glass="1"] .xq-music,
+:root[data-glass="1"] .xq-wx-embed,
+:root[data-glass="1"] .home-audio-card,
+:root[data-glass="1"] .mic-lock-card,
+:root[data-glass="1"] .system-overview-panel,
+:root[data-glass="1"] .st-cat-card,
+:root[data-glass="1"] .home-overview-tab-list {
+    background: rgba(28, 31, 41, .38) !important;
+    backdrop-filter: blur(14px) saturate(135%);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+}
+/* 浅色主题：磨砂改成奶白半透明 */
+:root:not([data-theme="dark"])[data-glass="1"] .app-container { background: rgba(255, 255, 255, .50) !important; }
+:root:not([data-theme="dark"])[data-glass="1"] .sidebar { background: rgba(255, 255, 255, .40) !important; }
+:root:not([data-theme="dark"])[data-glass="1"] .titlebar { background: rgba(255, 255, 255, .44) !important; }
+:root:not([data-theme="dark"])[data-glass="1"] .content-inner { background: rgba(255, 255, 255, .52) !important; }
+:root:not([data-theme="dark"])[data-glass="1"] .setting-card,
+:root:not([data-theme="dark"])[data-glass="1"] .direct-download-card,
+:root:not([data-theme="dark"])[data-glass="1"] .xq-music,
+:root:not([data-theme="dark"])[data-glass="1"] .xq-wx-embed,
+:root:not([data-theme="dark"])[data-glass="1"] .home-audio-card,
+:root:not([data-theme="dark"])[data-glass="1"] .mic-lock-card,
+:root:not([data-theme="dark"])[data-glass="1"] .system-overview-panel,
+:root:not([data-theme="dark"])[data-glass="1"] .st-cat-card,
+:root:not([data-theme="dark"])[data-glass="1"] .home-overview-tab-list {
+    background: rgba(255, 255, 255, .62) !important;
+}
 </style>
 </body>
 </html>

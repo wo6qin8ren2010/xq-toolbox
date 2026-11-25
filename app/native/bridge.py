@@ -262,6 +262,19 @@ class Bridge:
             log("界面", "设置窗口标题失败：%s" % exc, "警告")
         return ""
 
+    def _cmd_set_glass(self, args, raw):
+        """全局磨砂背景开关：0|dark 关，1|dark 深色磨砂，1|light 浅色磨砂。"""
+        on = (args[0].strip() if args else "") in ("1", "on", "true")
+        light = (args[1].strip() if len(args) > 1 else "").lower() == "light"
+        try:
+            from . import glass
+            ok = glass.set_enabled(on, light)
+            log("界面", "磨砂背景：%s" % ("开（%s）" % ("浅色" if light else "深色") if on else "关"),
+                "信息" if ok else "警告")
+        except Exception as exc:
+            log("界面", "磨砂背景切换失败：%s" % exc, "警告")
+        return ""
+
     def _cmd_user_click(self, args, raw):
         action = args[0] if args else ""
         target = "|".join(args[1:])
