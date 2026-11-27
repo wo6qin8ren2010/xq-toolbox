@@ -19,13 +19,39 @@ import urllib.request
 from .library import DATA_DIR
 from .paths import log
 
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.4.2"
 DEFAULT_BASE = "https://github.com/wo6qin8ren2010/xq-toolbox/releases/latest/download"
 CFG_FILE = os.path.join(DATA_DIR, "更新设置.json")
 DL_DIR = os.path.join(DATA_DIR, "更新下载")
 PENDING_META = os.path.join(DL_DIR, "pending.json")
 UA = "XQToolbox-Updater/1.0"
 _DL_LOCK = threading.Lock()
+
+# 下载进度：前端每 200ms 轮询一次，用于显示进度条
+_PROGRESS = {"phase": "idle", "percent": 0, "got": 0, "total": 0, "speed": 0, "msg": "", "version": ""}
+_PROGRESS_LOCK = threading.Lock()
+_PROGRESS_T = 0.0
+
+
+def progress() -> dict:
+    with _PROGRESS_LOCK:
+        return dict(_PROGRESS)
+
+
+def _set_progress(**kw) -> None:
+    global _PROGRESS_T
+    now = time.time()
+    with _PROGRESS_LOCK:
+        for key, val in kw.items():
+            if key in _PROGRESS:
+                _PROGRESS[key] = val
+    _PROGRESS_T = now
+
+
+def _progress_throttled(force: bool = False) -> bool:
+    """进度写得太勤会抢 CPU，100ms 一次足够前端平滑显示。"""
+    return force or (time.time() - _PROGRESS_T) > 0.1
+
 
 
 def read_cfg() -> dict:
@@ -137,26 +163,47 @@ def _candidates(url: str) -> list:
 
 
 def _open_multi(url: str, timeout: float, tries: int = 1):
-    """按 直连 → 镜像 依次尝试，谁先通用谁，并记住这条线路。"""
+    """直连与各镜像并发探测，谁先通用谁，并记住这条线路。
+
+    串行试探是之前“检查更新卡住”的主因：直连超时 6 秒后再逐个试镜像，
+    最坏要等二十多秒还毫无反应。并发后整体上限就是一个 timeout。
+    """
     urls = _candidates(url)
-    last = None
-    for candidate in urls:
+    if len(urls) == 1:
+        last = None
         for idx in range(max(1, tries)):
             try:
-                resp = _get(candidate, timeout)
+                return _get(urls[0], timeout)
             except Exception as exc:
                 last = exc
                 if idx + 1 < tries:
                     time.sleep(1.0)
+        raise last
+
+    import concurrent.futures
+
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(urls))
+    futures = {pool.submit(_get, candidate, timeout): candidate for candidate in urls}
+    last = None
+    try:
+        for fut in concurrent.futures.as_completed(futures, timeout=timeout + 1.0):
+            candidate = futures[fut]
+            try:
+                resp = fut.result()
+            except Exception as exc:
+                last = exc
                 continue
+            for other in futures:
+                other.cancel()
             prefix = candidate[: len(candidate) - len(url)] if candidate.endswith(url) else ""
             _remember_mirror(prefix)
             if prefix:
                 log("自动更新", "改走镜像线路：%s" % prefix, "信息")
             return resp
-    if len(urls) > 1:
-        raise ValueError("直连与 %d 个镜像均不可达（最后错误：%s）" % (len(urls) - 1, last))
-    raise last if last is not None else ValueError("连接失败")
+    finally:
+        pool.shutdown(wait=False)
+    raise ValueError("直连与 %d 个镜像均不可达（最后错误：%s）" % (len(urls) - 1, last)) if last else ValueError("连接失败")
+
 
 
 def check(base: str) -> dict:
@@ -202,11 +249,12 @@ def _file_sha256(path: str) -> str:
     return digest.hexdigest()
 
 
-def download_and_verify(url: str, sha256: str) -> str:
+def download_and_verify(url: str, sha256: str, version: str = "") -> str:
     """先下载到 .part 临时文件，校验通过后原子换入 pending.exe。
 
     绝不直接写 pending.exe：多个触发点并发下载同一文件会互相截断，
     留下哈希对不上的残缺包，导致退出时替换失败。
+    下载过程中持续写入 progress() 供前端显示进度条。
     """
     os.makedirs(DL_DIR, exist_ok=True)
     target = os.path.join(DL_DIR, "pending.exe")
@@ -216,6 +264,7 @@ def download_and_verify(url: str, sha256: str) -> str:
             try:
                 if _file_sha256(target) == want:
                     log("自动更新", "已存在校验通过的更新包，跳过重复下载", "信息")
+                    _set_progress(phase="done", percent=100, msg="更新包已就绪", version=version)
                     return target
             except Exception:
                 pass
@@ -225,8 +274,16 @@ def download_and_verify(url: str, sha256: str) -> str:
             digest = hashlib.sha256()
             size = 0
             started = time.time()
+            _set_progress(phase="download", percent=0, got=0, total=0, speed=0,
+                          msg="正在下载更新包…" if attempt == 0 else "下载重试中（第 2 次）…",
+                          version=version)
             try:
                 with _open_multi(url, 30) as resp, open(part, "wb") as fh:
+                    try:
+                        total = int(resp.headers.get("Content-Length") or 0)
+                    except Exception:
+                        total = 0
+                    _set_progress(total=total)
                     while True:
                         chunk = resp.read(262144)
                         if not chunk:
@@ -234,6 +291,13 @@ def download_and_verify(url: str, sha256: str) -> str:
                         fh.write(chunk)
                         digest.update(chunk)
                         size += len(chunk)
+                        if _progress_throttled():
+                            elapsed = max(0.001, time.time() - started)
+                            _set_progress(
+                                got=size,
+                                percent=min(99, int(size * 100 / total)) if total else 0,
+                                speed=int(size / elapsed),
+                            )
             except Exception as exc:
                 last = exc
                 log("自动更新", "下载中断（第 %d 次）：%s" % (attempt + 1, exc), "警告")
@@ -244,6 +308,8 @@ def download_and_verify(url: str, sha256: str) -> str:
                 log("自动更新", "下载文件异常：%d 字节，准备重试" % size, "警告")
                 time.sleep(1.0)
                 continue
+            _set_progress(phase="verify", percent=100, got=size, total=size,
+                          msg="正在校验 SHA256…", version=version)
             got = digest.hexdigest()
             if want and got != want:
                 last = ValueError("SHA256 校验不一致，已丢弃下载包")
@@ -252,13 +318,16 @@ def download_and_verify(url: str, sha256: str) -> str:
                 continue
             os.replace(part, target)
             log("自动更新", "更新包下载完成：%d 字节，用时 %.1fs，sha256=%s" % (size, time.time() - started, got), "成功")
+            _set_progress(phase="done", percent=100, msg="下载与校验完成", version=version)
             return target
         try:
             if os.path.isfile(part):
                 os.remove(part)
         except Exception:
             pass
-        raise last if last is not None else ValueError("下载失败")
+        err = last if last is not None else ValueError("下载失败")
+        _set_progress(phase="error", msg="更新包下载失败：%s" % err, version=version)
+        raise err
 
 
 UPDATER_PS1 = """param([string]$New,[string]$Target,[string]$ProcName,[string]$Meta,[switch]$NoRelaunch,[string]$Sha)

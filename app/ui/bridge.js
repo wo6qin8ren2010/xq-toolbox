@@ -652,8 +652,55 @@
     el.style.color = ok ? '#1a7f37' : '#c0392b';
   }
   function closeUpdDialog() {
+    stopUpdPoll();
     var ov = document.getElementById('xqUpdDialog');
     if (ov) ov.parentNode.removeChild(ov);
+  }
+  var _updPollTimer = null;
+  var _updBusy = false;
+  function stopUpdPoll() {
+    if (_updPollTimer) { clearInterval(_updPollTimer); _updPollTimer = null; }
+    _updBusy = false;
+  }
+  function startUpdPoll() {
+    stopUpdPoll();
+    _updPollTimer = setInterval(function () {
+      if (_updBusy) return;
+      _updBusy = true;
+      postCommand('update_progress');
+      setTimeout(function () { _updBusy = false; }, 350);
+    }, 260);
+  }
+  function setUpdProgress(pg) {
+    var wrap = document.getElementById('xqUpdProgWrap');
+    var bar = document.getElementById('xqUpdProgBar');
+    var txt = document.getElementById('xqUpdProgText');
+    if (!wrap || !bar || !txt) return;
+    wrap.style.display = 'block';
+    var pct = Math.max(0, Math.min(100, Number(pg.percent) || 0));
+    if (pg.phase === 'verify' || pg.phase === 'done' || pg.phase === 'applying') pct = 100;
+    bar.style.width = pct + '%';
+    var mb = (Number(pg.got) || 0) / 1048576;
+    var tot = (Number(pg.total) || 0) / 1048576;
+    var spd = (Number(pg.speed) || 0) / 1048576;
+    if (pg.phase === 'download') {
+      txt.textContent = '正在下载 ' + pct + '%' + (tot > 0.1 ? '（' + mb.toFixed(1) + ' / ' + tot.toFixed(1) + ' MB）' : '') +
+        (spd > 0.05 ? ' · ' + spd.toFixed(2) + ' MB/s' : '');
+    } else if (pg.phase === 'verify') {
+      txt.textContent = '下载完成，正在校验 SHA256…';
+    } else if (pg.phase === 'done') {
+      txt.textContent = '校验通过，即将替换旧版本并重启…';
+    } else if (pg.phase === 'applying') {
+      txt.textContent = '正在替换旧版本，程序马上重启…';
+    } else if (pg.phase === 'error') {
+      txt.textContent = pg.msg || '更新失败';
+      txt.style.color = '#c0392b';
+      var okBtn = document.getElementById('xqUpdOk');
+      if (okBtn) { okBtn.disabled = false; okBtn.textContent = '重试'; }
+      stopUpdPoll();
+    } else {
+      txt.textContent = pg.msg || '准备下载…';
+    }
   }
   function openUpdDialog(info) {
     closeUpdDialog();
@@ -670,8 +717,14 @@
       '<div style="width:340px;padding:26px 26px 22px;border-radius:16px;background:' + cardBg + ';' +
         'border:1px solid ' + line + ';box-shadow:0 18px 48px rgba(0,0,0,.35);color:' + fg + '">' +
         '<div style="font-size:16px;font-weight:700;margin-bottom:6px">发现新版本 v' + escHtml(info.version || '') + '</div>' +
-        '<div style="font-size:12px;color:' + sub + ';margin-bottom:16px;line-height:1.6">' +
-          (info.notes ? escHtml(info.notes) + '<br>' : '') + '下载后先校验 SHA256，再自动覆盖重启；校验失败不会改动现有程序。</div>' +
+        '<div style="font-size:12px;color:' + sub + ';margin-bottom:12px;line-height:1.6">' +
+          (info.notes ? escHtml(info.notes) + '<br>' : '') + '下载完成后自动校验 SHA256，进度条走满即替换并重启；校验失败不会改动现有程序。</div>' +
+        '<div id="xqUpdProgWrap" style="display:none;margin:0 0 14px">' +
+          '<div style="height:6px;border-radius:4px;background:rgba(120,140,170,.25);overflow:hidden">' +
+            '<div id="xqUpdProgBar" style="height:100%;width:0%;border-radius:4px;background:linear-gradient(90deg,#2f86f6,#4fb3ff);transition:width .2s"></div>' +
+          '</div>' +
+          '<div id="xqUpdProgText" style="font-size:12px;color:' + sub + ';margin-top:8px">准备下载…</div>' +
+        '</div>' +
         '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:6px">' +
           '<button id="xqUpdCancel" style="border:1px solid ' + line + ';border-radius:10px;padding:7px 16px;' +
             'font-size:13px;cursor:pointer;background:transparent;color:' + sub + '">稍后</button>' +
@@ -682,10 +735,13 @@
     document.body.appendChild(ov);
     document.getElementById('xqUpdOk').addEventListener('click', function () {
       var btn = document.getElementById('xqUpdOk');
+      if (!btn || btn.disabled) return;
       btn.disabled = true;
-      btn.textContent = '下载校验中…';
-      setUpdHint('正在下载并校验更新包…', true);
-      postCommand('update_apply|' + encodeURIComponent(info.url || '') + '|' + (info.sha256 || ''));
+      btn.textContent = '下载中…';
+      setUpdHint('正在下载更新包…', true);
+      setUpdProgress({ phase: 'download', percent: 0, msg: '正在连接下载线路…' });
+      startUpdPoll();
+      postCommand('update_download|' + encodeURIComponent(info.url || '') + '|' + (info.sha256 || '') + '|' + encodeURIComponent(info.version || ''));
     });
     document.getElementById('xqUpdCancel').addEventListener('click', closeUpdDialog);
   }
@@ -710,6 +766,7 @@
       return true;
     }
     if (s.indexOf('update_check_result|') === 0) {
+      clearUpdCheckTimer();
       var rest = s.slice('update_check_result|'.length);
       var mode = rest.split('|')[0];
       var info = {};
@@ -725,6 +782,21 @@
         if (mode === 'manual') setUpdHint('请先填写更新源直链前缀并保存', false);
       } else {
         setUpdHint(info.msg || '检查更新失败', false);
+      }
+      return true;
+    }
+    if (s.indexOf('update_progress|') === 0) {
+      var pg = {};
+      try { pg = JSON.parse(s.slice('update_progress|'.length)); } catch (e) { return true; }
+      setUpdProgress(pg);
+      if (pg.phase === 'done' || pg.phase === 'applying') {
+        setUpdHint(pg.msg || '校验通过，即将替换并重启…', true);
+        var btnDone = document.getElementById('xqUpdOk');
+        if (btnDone) { btnDone.disabled = true; btnDone.textContent = '即将重启…'; }
+        var ccDone = document.getElementById('xqUpdCancel');
+        if (ccDone) ccDone.style.display = 'none';
+      } else if (pg.phase === 'error') {
+        setUpdHint(pg.msg || '更新失败', false);
       }
       return true;
     }
@@ -753,8 +825,17 @@
     var sl = document.getElementById('xqUpdSilent');
     postCommand('update_config|' + ((a && a.checked) ? '1' : '0') + '|' + encodeURIComponent(b ? b.value.trim() : '') + '|' + ((sl && sl.checked) ? '1' : '0'));
   };
+  var _updCheckTimer = null;
+  function clearUpdCheckTimer() {
+    if (_updCheckTimer) { clearTimeout(_updCheckTimer); _updCheckTimer = null; }
+  }
   window.xqUpdCheck = function () {
     setUpdHint('正在检查更新…', true);
+    clearUpdCheckTimer();
+    _updCheckTimer = setTimeout(function () {
+      _updCheckTimer = null;
+      setUpdHint('检查更新超时（15 秒无响应），请检查网络或更新源地址后重试', false);
+    }, 15000);
     postCommand('update_check|manual');
   };
 

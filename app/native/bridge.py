@@ -862,7 +862,9 @@ class Bridge:
         cfg = update.read_cfg()
         try:
             res = update.check(cfg["base"])
-            if res.get("status") == "available" and cfg["silent"]:
+            # 手动检查只负责“查”，下载交给前端的进度条流程；
+            # 之前这里连手动触发也同步下载 12MB，界面会一直停在“正在检查更新”。
+            if res.get("status") == "available" and cfg["silent"] and mode != "manual":
                 meta = update.stage(res["url"], res.get("sha256", ""), res["version"])
                 # 下载并校验完成立即挂上"退出即替换"脚本，不依赖后续再进设置页
                 armed = False
@@ -880,6 +882,44 @@ class Bridge:
             res = {"status": "error", "msg": "检查更新失败：%s" % exc}
         log("自动更新", "检查更新(%s)：%s" % (mode, res.get("msg", res.get("status"))), "信息")
         return "update_check_result|" + mode + "|" + json.dumps(res, ensure_ascii=False)
+
+    # ---------------------------------------------------------------
+    # 带进度条的下载：后台线程下载校验，进度条走满即替换并重启
+    # ---------------------------------------------------------------
+    _dl_lock = threading.Lock()
+    _dl_running = False
+
+    def _cmd_update_progress(self, args, raw):
+        return "update_progress|" + json.dumps(update.progress(), ensure_ascii=False)
+
+    def _cmd_update_download(self, args, raw):
+        url = urllib.parse.unquote(args[0]) if args else ""
+        sha = args[1] if len(args) > 1 else ""
+        version = urllib.parse.unquote(args[2]) if len(args) > 2 else ""
+        if not url.startswith(("http://", "https://")):
+            return "update_progress|" + json.dumps({"phase": "error", "msg": "更新包地址无效", "version": version}, ensure_ascii=False)
+        with Bridge._dl_lock:
+            if Bridge._dl_running:
+                return "update_progress|" + json.dumps(update.progress(), ensure_ascii=False)
+            Bridge._dl_running = True
+        update._set_progress(phase="download", percent=0, got=0, total=0, speed=0,
+                             msg="正在连接下载线路…", version=version)
+        threading.Thread(target=self._update_download_worker, args=(url, sha, version), daemon=True).start()
+        return "update_progress|" + json.dumps(update.progress(), ensure_ascii=False)
+
+    def _update_download_worker(self, url: str, sha: str, version: str) -> None:
+        try:
+            pending = update.download_and_verify(url, sha, version)
+            update._set_progress(phase="applying", percent=100, msg="校验通过，正在替换旧版本…", version=version)
+            update.apply(pending, relaunch=True, sha=sha)
+            log("自动更新", "更新包已就绪，退出后覆盖并自动重启 v%s" % version, "成功")
+            threading.Timer(1.2, self._exit_for_update).start()
+        except Exception as exc:
+            log("自动更新", "更新失败：%s" % exc, "错误")
+            update._set_progress(phase="error", msg="更新失败：%s" % exc, version=version)
+        finally:
+            with Bridge._dl_lock:
+                Bridge._dl_running = False
 
     def _cmd_update_apply(self, args, raw):
         url = urllib.parse.unquote(args[0]) if args else ""
