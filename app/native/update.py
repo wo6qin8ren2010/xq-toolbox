@@ -19,7 +19,7 @@ import urllib.request
 from .library import DATA_DIR
 from .paths import log
 
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.4.3"
 DEFAULT_BASE = "https://github.com/wo6qin8ren2010/xq-toolbox/releases/latest/download"
 CFG_FILE = os.path.join(DATA_DIR, "更新设置.json")
 DL_DIR = os.path.join(DATA_DIR, "更新下载")
@@ -387,15 +387,47 @@ for ($k = 0; $k -lt 30; $k++) {
 if ($done) {
     try { [System.IO.File]::Delete($New) } catch {}
     try { if ($Meta -and [System.IO.File]::Exists($Meta)) { [System.IO.File]::Delete($Meta) } } catch {}
-    try { [System.IO.File]::Delete($backup) } catch {}
+    $started = $false
     if (-not $NoRelaunch) {
-        # 覆盖成功后自动拉起新版，工作目录设为程序所在目录
+        # 覆盖后不能立刻拉起：刚退出的进程句柄释放、杀毒扫描新 exe 都要时间，
+        # 太早启动会让 onefile 解压失败（报 python312.dll 找不到）。多等再重试。
+        [System.Threading.Thread]::Sleep(2500)
+        for ($r = 0; $r -lt 5; $r++) {
+            try {
+                $psi = [System.Diagnostics.ProcessStartInfo]::new()
+                $psi.FileName = $Target
+                $psi.WorkingDirectory = [System.IO.Path]::GetDirectoryName($Target)
+                $psi.UseShellExecute = $true
+                $proc = [System.Diagnostics.Process]::Start($psi)
+                [System.Threading.Thread]::Sleep(4000)
+                try {
+                    $proc.Refresh()
+                    if (-not $proc.HasExited) { $started = $true }
+                } catch {}
+                if (-not $started) {
+                    if ([System.Diagnostics.Process]::GetProcessesByName($ProcName).Length -gt 0) { $started = $true }
+                }
+            } catch {}
+            if ($started) { break }
+            [System.Threading.Thread]::Sleep(2000)
+        }
+    } else {
+        $started = $true
+    }
+    if ($started) {
+        try { [System.IO.File]::Delete($backup) } catch {}
+    } else {
+        # 新版起不来就回滚旧版，保证用户手里始终有个能跑的程序
         try {
-            $psi = [System.Diagnostics.ProcessStartInfo]::new()
-            $psi.FileName = $Target
-            $psi.WorkingDirectory = [System.IO.Path]::GetDirectoryName($Target)
-            $psi.UseShellExecute = $true
-            [System.Diagnostics.Process]::Start($psi) | Out-Null
+            [System.IO.File]::Delete($Target)
+        } catch {}
+        try {
+            [System.IO.File]::Move($backup, $Target)
+            $psi2 = [System.Diagnostics.ProcessStartInfo]::new()
+            $psi2.FileName = $Target
+            $psi2.WorkingDirectory = [System.IO.Path]::GetDirectoryName($Target)
+            $psi2.UseShellExecute = $true
+            [System.Diagnostics.Process]::Start($psi2) | Out-Null
         } catch {}
     }
 } else {
