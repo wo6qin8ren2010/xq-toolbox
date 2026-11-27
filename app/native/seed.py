@@ -53,33 +53,47 @@ def _write_stamp(fingerprint: str) -> None:
         pass
 
 
-def _merge_into(target: dict, seed_data: dict) -> int:
-    """把内置条目按 id 并入用户数据，只补缺不覆盖；返回新增条数。"""
+def _merge_into(target: dict, seed_data: dict) -> tuple:
+    """把内置条目并入用户数据：缺的补上，同 id 内容有变就更新为内置版本。
+
+    内置库跟着新版本一起发，属于"最新发布的内容"，所以同一 id 以它为准；
+    用户本地独有的条目（内置里没有的）一律保留不动。返回 (新增数, 更新数)。
+    """
     added = 0
+    updated = 0
     for key in ("software", "projects"):
         mine = target.get(key)
         if not isinstance(mine, list):
             mine = []
             target[key] = mine
-        have = set()
-        for item in mine:
+        index = {}
+        for i, item in enumerate(mine):
             if isinstance(item, dict) and item.get("id"):
-                have.add(item["id"])
+                index[str(item["id"])] = i
         for item in seed_data.get(key) or []:
             if not isinstance(item, dict):
                 continue
             iid = str(item.get("id") or "")
-            if not iid or iid in have:
+            if not iid:
                 continue
-            mine.append(item)
-            have.add(iid)
-            added += 1
+            if iid not in index:
+                mine.append(item)
+                index[iid] = len(mine) - 1
+                added += 1
+                continue
+            old = mine[index[iid]]
+            if old != item:
+                # 保留本地可能存在、内置没有的额外字段
+                merged = dict(old)
+                merged.update(item)
+                mine[index[iid]] = merged
+                updated += 1
     try:
         if int(seed_data.get("version") or 0) > int(target.get("version") or 0):
             target["version"] = seed_data.get("version")
     except Exception:
         pass
-    return added
+    return added, updated
 
 
 def _write_json(path: str, data: dict) -> None:
@@ -126,12 +140,12 @@ def _sync_library() -> None:
         return
 
     try:
-        added = _merge_into(target, seed_data)
+        added, updated = _merge_into(target, seed_data)
     except Exception as exc:
         log("自建库同步", "合并失败：%s" % exc, "警告")
         return
 
-    if added <= 0:
+    if added <= 0 and updated <= 0:
         _write_stamp(fingerprint)
         return
     try:
@@ -141,7 +155,7 @@ def _sync_library() -> None:
     try:
         _write_json(library.DATA_FILE, target)
         _write_stamp(fingerprint)
-        log("自建库同步", "已同步内置内容，新增 %d 条（原有数据保留）" % added, "成功")
+        log("自建库同步", "已同步内置内容：新增 %d 条，更新 %d 条（本地独有条目保留）" % (added, updated), "成功")
     except Exception as exc:
         log("自建库同步", "写入失败：%s" % exc, "警告")
 
