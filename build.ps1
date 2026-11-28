@@ -26,7 +26,7 @@ Start-Sleep -Milliseconds 800
   --hidden-import app.native.lestore --hidden-import app.native.library `
   --hidden-import app.native.maintenance --hidden-import app.native.update `
   --hidden-import app.native.music --hidden-import app.native.dock --hidden-import native.dock `
-  --hidden-import app.native.remote --hidden-import app.native.autostart --hidden-import native.autostart `
+  --hidden-import app.native.autostart --hidden-import native.autostart `
   --hidden-import winrt.system --hidden-import winrt.windows.media.control `
   --hidden-import winrt.windows.storage.streams --hidden-import winrt.windows.foundation `
   --hidden-import winrt.windows.foundation.collections --hidden-import native.glass app\main.py

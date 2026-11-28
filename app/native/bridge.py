@@ -14,7 +14,7 @@ import urllib.request
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 
-from . import audio, backup, cloud, config, lestore, library, music, remote, studio, sysinfo, system_tools, update, vst
+from . import audio, backup, cloud, config, lestore, library, music, studio, sysinfo, system_tools, update, vst
 from .downloads import Downloader
 from .paths import log
 
@@ -889,55 +889,6 @@ class Bridge:
     _dl_lock = threading.Lock()
     _dl_running = False
 
-    def _cmd_remote_state(self, args, raw):
-        try:
-            payload = remote.state()
-        except Exception as exc:
-            log("远程调试", "读取 X·Q Desk 状态失败：%s" % exc, "警告")
-            payload = {"available": False, "msg": "读取失败：%s" % exc}
-        return "remote_state|" + json.dumps(payload, ensure_ascii=False)
-
-    def _cmd_remote_copy(self, args, raw):
-        field = args[0] if args else ""
-        try:
-            res = remote.copy_self(field)
-        except Exception as exc:
-            res = {"ok": False, "msg": "复制失败：%s" % exc}
-        return "remote_action|" + json.dumps(res, ensure_ascii=False)
-
-    def _cmd_remote_connect(self, args, raw):
-        peer = urllib.parse.unquote(args[0]) if args else ""
-        try:
-            res = remote.connect(peer)
-        except Exception as exc:
-            log("远程调试", "发起连接失败：%s" % exc, "警告")
-            res = {"ok": False, "msg": "发起连接失败：%s" % exc}
-        state = None
-        if res.get("ok"):
-            try:
-                state = remote.state()
-            except Exception:
-                state = None
-        payload = dict(res)
-        if state:
-            payload["state"] = state
-        return "remote_action|" + json.dumps(payload, ensure_ascii=False)
-
-    def _cmd_remote_clip(self, args, raw):
-        text = urllib.parse.unquote(args[0]) if args else ""
-        try:
-            res = remote.copy_text(text, launch=True)
-        except Exception as exc:
-            res = {"ok": False, "msg": "复制失败：%s" % exc, "target": "ip"}
-        return "remote_action|" + json.dumps(res, ensure_ascii=False)
-
-    def _cmd_remote_open(self, args, raw):
-        try:
-            res = remote.open_tool()
-        except Exception as exc:
-            res = {"ok": False, "msg": "打开失败：%s" % exc}
-        return "remote_action|" + json.dumps(res, ensure_ascii=False)
-
     def _cmd_update_progress(self, args, raw):
         return "update_progress|" + json.dumps(update.progress(), ensure_ascii=False)
 
@@ -965,7 +916,7 @@ class Bridge:
             threading.Timer(1.2, self._exit_for_update).start()
         except Exception as exc:
             log("自动更新", "更新失败：%s" % exc, "错误")
-            update._set_progress(phase="error", msg="更新失败：%s" % update.friendly_net_error(exc), version=version)
+            update._set_progress(phase="error", msg="更新失败：%s" % exc, version=version)
         finally:
             with Bridge._dl_lock:
                 Bridge._dl_running = False

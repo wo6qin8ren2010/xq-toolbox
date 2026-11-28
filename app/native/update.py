@@ -13,14 +13,13 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 
 from .library import DATA_DIR
 from .paths import log
 
-APP_VERSION = "1.4.6"
+APP_VERSION = "1.4.4"
 DEFAULT_BASE = "https://github.com/wo6qin8ren2010/xq-toolbox/releases/latest/download"
 CFG_FILE = os.path.join(DATA_DIR, "更新设置.json")
 DL_DIR = os.path.join(DATA_DIR, "更新下载")
@@ -116,10 +115,8 @@ MIRRORS = (
     "https://ghproxy.net/",
 )
 MIRROR_FILE = os.path.join(DATA_DIR, "更新镜像.json")
-SPEED_FILE = os.path.join(DATA_DIR, "更新线路速度.json")
 _mirror_lock = threading.Lock()
 _good_mirror = None
-_LAST_PREFIX = ""
 
 
 def _load_mirror() -> str:
@@ -165,17 +162,13 @@ def _candidates(url: str) -> list:
     return [(p + url) if p else url for p in order]
 
 
-def _open_multi(url: str, timeout: float, tries: int = 1, no_direct: bool = False):
+def _open_multi(url: str, timeout: float, tries: int = 1):
     """直连与各镜像并发探测，谁先通用谁，并记住这条线路。
 
     串行试探是之前“检查更新卡住”的主因：直连超时 6 秒后再逐个试镜像，
     最坏要等二十多秒还毫无反应。并发后整体上限就是一个 timeout。
-    no_direct=True 用于下载大文件：国内直连 GitHub 拿包通常只有百来 KB/s，
-    镜像优先，镜像个个不行再回退直连。
     """
     urls = _candidates(url)
-    if no_direct and len(urls) > 1:
-        urls = [candidate for candidate in urls if candidate != url]
     if len(urls) == 1:
         last = None
         for idx in range(max(1, tries)):
@@ -191,130 +184,25 @@ def _open_multi(url: str, timeout: float, tries: int = 1, no_direct: bool = Fals
 
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(urls))
     futures = {pool.submit(_get, candidate, timeout): candidate for candidate in urls}
-    errors = []
-    # 预算按“尽力而为”算：到点就收工，但已经回来的成功线路优先采用。
-    # 之前直接 as_completed(timeout=...) 在超时时抛出
-    # "N (of M) futures unfinished" 这种原始异常，一路透到界面红字，看着像崩溃。
-    budget = _probe_budget(timeout)
-    deadline = time.time() + budget
-    pending = set(futures)
+    last = None
     try:
-        while pending:
-            left = deadline - time.time()
-            if left <= 0:
-                break
-            done, pending = concurrent.futures.wait(
-                pending, timeout=min(0.3, left), return_when=concurrent.futures.FIRST_COMPLETED
-            )
-            for fut in done:
-                candidate = futures[fut]
-                try:
-                    resp = fut.result()
-                except Exception as exc:
-                    errors.append(exc)
-                    continue
-                for other in futures:
-                    if not other.done():
-                        other.cancel()
-                prefix = candidate[: len(candidate) - len(url)] if candidate.endswith(url) else ""
-                _remember_mirror(prefix)
-                _set_last_prefix(prefix)
-                if prefix:
-                    log("自动更新", "改走镜像线路：%s" % prefix, "信息")
-                return resp
+        for fut in concurrent.futures.as_completed(futures, timeout=timeout + 1.0):
+            candidate = futures[fut]
+            try:
+                resp = fut.result()
+            except Exception as exc:
+                last = exc
+                continue
+            for other in futures:
+                other.cancel()
+            prefix = candidate[: len(candidate) - len(url)] if candidate.endswith(url) else ""
+            _remember_mirror(prefix)
+            if prefix:
+                log("自动更新", "改走镜像线路：%s" % prefix, "信息")
+            return resp
     finally:
         pool.shutdown(wait=False)
-    http_err = next((e for e in errors if isinstance(e, urllib.error.HTTPError)), None)
-    if http_err is not None:
-        # 404 之类是“路径/仓库写错了”，不是网络问题，原样抛出好让上层给出准确提示
-        raise http_err
-    if errors and _is_conn_error(errors[-1]):
-        raise ValueError("所有线路都连不上（%d 条候选，最后一条错误：%s）" % (len(urls), errors[-1]))
-    raise ValueError("%d 条线路在 %d 秒内都没有响应" % (len(urls), int(budget)))
-
-
-def _set_last_prefix(prefix: str) -> None:
-    global _LAST_PREFIX
-    _LAST_PREFIX = prefix
-
-
-def _probe_budget(timeout: float) -> float:
-    """给并发探测留的总时长：单线路超时之上再加一点排队余量。"""
-    try:
-        tmo = float(timeout)
-    except Exception:
-        tmo = 6.0
-    return max(3.0, tmo) + 2.0
-
-
-def _load_speeds() -> dict:
-    try:
-        with open(SPEED_FILE, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        return {str(k): float(v) for k, v in dict(data).items()}
-    except Exception:
-        return {}
-
-
-def _save_speed(prefix: str, bytes_per_sec: float) -> None:
-    """记住每条线路实测下载速度，下次直接挑最快的，别再从直连慢慢磨。"""
-    if not bytes_per_sec or bytes_per_sec <= 0:
-        return
-    try:
-        data = _load_speeds()
-        data[str(prefix)] = round(float(bytes_per_sec))
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(SPEED_FILE, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-
-def _try_fast_line(url: str, timeout: float = 20.0):
-    """按历史测速挑一条线路直连；没把握就返回 None 交给并发探测。"""
-    if not _mirrorable(url):
-        return None
-    speeds = _load_speeds()
-    if not speeds:
-        return None
-    usable = [(kbps, prefix) for prefix, kbps in speeds.items()
-              if kbps >= 200 and ((prefix + url) in _candidates(url))]
-    if not usable:
-        return None
-    prefix = max(usable)[1]
-    try:
-        return _get((prefix + url) if prefix else url, timeout), prefix
-    except Exception as exc:
-        log("自动更新", "上次测速最快的线路不可用（%s）：%s" % (prefix or "直连", exc), "警告")
-        return None
-
-
-def _is_conn_error(exc) -> bool:
-    import socket
-    import urllib.error
-
-    if isinstance(exc, (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError)):
-        return True
-    low = str(exc or "").lower()
-    return any(k in low for k in ("timed out", "timeout", "refused", "getaddrinfo", "unreachable", "handshake", "ssl", "eof"))
-
-
-def friendly_net_error(exc) -> str:
-    """把底层异常翻成用户能看懂的一句话，原始异常只进日志。"""
-    low = str(exc or "").lower()
-    if isinstance(exc, urllib.error.HTTPError):
-        if exc.code == 404:
-            return "更新源里没有 version.json，请检查更新源地址是否填对"
-        return "更新服务器返回 HTTP %s，请稍后重试" % exc.code
-    if _is_conn_error(exc):
-        return "网络不通或线路被拦截，请检查网络后重试（可多试几次，会自动换线路）"
-    if "sha256" in low or "校验" in low:
-        return "更新包校验失败，已丢弃，请重试"
-    if "version" in low and "缺少" in low:
-        return "版本清单格式不对（缺少 version 字段）"
-    if "所有线路" in str(exc or "") or "没有响应" in str(exc or ""):
-        return "线路都没响应，请稍后重试"
-    return "网络异常，请稍后重试（详情已写入日志）"
+    raise ValueError("直连与 %d 个镜像均不可达（最后错误：%s）" % (len(urls) - 1, last)) if last else ValueError("连接失败")
 
 
 
@@ -327,12 +215,12 @@ def check(base: str) -> dict:
         return {"status": "error", "msg": "更新源地址需以 http:// 或 https:// 开头"}
     url = base.rstrip("/") + "/version.json"
     try:
-        # 直连与镜像并发探测，单线路给 8 秒；自定义源不是 GitHub，保留原来的两次重试
-        with _open_multi(url, 8 if _mirrorable(url) else 25, 1 if _mirrorable(url) else 2) as resp:
+        # 直连给 6 秒就够判断通不通；自定义源不是 GitHub，保留原来的两次重试
+        with _open_multi(url, 6 if _mirrorable(url) else 25, 1 if _mirrorable(url) else 2) as resp:
             manifest = json.loads(resp.read().decode("utf-8-sig"))
     except Exception as exc:
         log("自动更新", "拉取版本清单失败：%s" % exc, "警告")
-        return {"status": "error", "msg": "检查更新失败：%s" % friendly_net_error(exc)}
+        return {"status": "error", "msg": "拉取版本清单失败：%s" % exc}
     remote = str(manifest.get("version", "") or "")
     if not remote:
         return {"status": "error", "msg": "版本清单缺少 version 字段"}
@@ -390,21 +278,7 @@ def download_and_verify(url: str, sha256: str, version: str = "") -> str:
                           msg="正在下载更新包…" if attempt == 0 else "下载重试中（第 2 次）…",
                           version=version)
             try:
-                resp = None
-                prefix = ""
-                fast = _try_fast_line(url, 20)
-                if fast is not None:
-                    resp, prefix = fast
-                    _set_last_prefix(prefix)
-                    log("自动更新", "按测速记录走 %s 下载" % (prefix or "直连"), "信息")
-                else:
-                    try:
-                        resp = _open_multi(url, 30, no_direct=True)
-                    except Exception as exc:
-                        log("自动更新", "镜像线路均不可用（%s），回退直连" % exc, "警告")
-                        resp = _open_multi(url, 30)
-                    prefix = _LAST_PREFIX
-                with resp, open(part, "wb") as fh:
+                with _open_multi(url, 30) as resp, open(part, "wb") as fh:
                     try:
                         total = int(resp.headers.get("Content-Length") or 0)
                     except Exception:
@@ -443,8 +317,7 @@ def download_and_verify(url: str, sha256: str, version: str = "") -> str:
                 time.sleep(1.0)
                 continue
             os.replace(part, target)
-            _save_speed(prefix, size / max(0.001, time.time() - started))
-            log("自动更新", "更新包下载完成：%d 字节，用时 %.1fs，线路=%s，sha256=%s" % (size, time.time() - started, prefix or "直连", got), "成功")
+            log("自动更新", "更新包下载完成：%d 字节，用时 %.1fs，sha256=%s" % (size, time.time() - started, got), "成功")
             _set_progress(phase="done", percent=100, msg="下载与校验完成", version=version)
             return target
         try:
@@ -453,7 +326,7 @@ def download_and_verify(url: str, sha256: str, version: str = "") -> str:
         except Exception:
             pass
         err = last if last is not None else ValueError("下载失败")
-        _set_progress(phase="error", msg="更新包下载失败：%s" % friendly_net_error(err), version=version)
+        _set_progress(phase="error", msg="更新包下载失败：%s" % err, version=version)
         raise err
 
 
