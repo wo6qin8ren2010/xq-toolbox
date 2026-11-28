@@ -4928,7 +4928,89 @@
         :root:not([data-theme="dark"]) .xq-maint .m-badge.badge-port { color: #16834b !important; background: rgba(52, 199, 89, .14) !important; }
         /* 按钮统一高度圆角 */
         :root:not([data-theme="dark"]) .xq-maint .m-btn { min-height: 34px; padding: 8px 16px !important; border-radius: 10px !important; }
-        /* 调试面板内卡边框减淡，避免双重描边 */
+        /* ===== 远程调试面板（按 X·Q Desk 排版：本桌面 / 远程桌面 / 近期连接 / 状态条） ===== */
+.xr-wrap{
+  --xr-bg:#f5f0ff;
+  --xr-card:#ffffff;
+  --xr-line:#e6dbff;
+  --xr-fg:#1e1636;
+  --xr-sub:#8a7da6;
+  --xr-id-bg:#f5f1ff;
+  --xr-id-fg:#221545;
+  --xr-primary:#7c4dff;
+  --xr-primary-hi:#9a74ff;
+  --xr-shadow:0 10px 24px rgba(103,58,183,.10);
+  display:flex; flex-direction:column; height:100%; min-height:0;
+  padding:14px 16px 0; box-sizing:border-box;
+  background:var(--xr-bg); border-radius:14px; color:var(--xr-fg);
+}
+:root[data-theme="dark"] .xr-wrap{
+  --xr-bg:#1b2030;
+  --xr-card:#242b3a;
+  --xr-line:#333c50;
+  --xr-fg:#eef2fb;
+  --xr-sub:#9aa7bd;
+  --xr-id-bg:#1a2030;
+  --xr-id-fg:#f2f5ff;
+  --xr-primary:#8b6bff;
+  --xr-primary-hi:#a486ff;
+  --xr-shadow:0 10px 26px rgba(0,0,0,.35);
+}
+.xr-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-shrink:0}
+.xr-tabs{display:flex;gap:8px;flex-wrap:wrap}
+.xr-tab{border:0;background:transparent;color:var(--xr-sub);font-size:13px;padding:6px 15px;border-radius:9px;cursor:pointer;transition:background .15s,color .15s}
+.xr-tab:hover{background:rgba(124,77,255,.10)}
+.xr-tab.is-active{background:var(--xr-primary);color:#fff;font-weight:600;box-shadow:0 4px 12px rgba(124,77,255,.28)}
+.xr-menu{width:32px;height:32px;border-radius:50%;border:1px solid var(--xr-line);background:var(--xr-card);color:var(--xr-fg);font-size:15px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.xr-menu:hover{border-color:var(--xr-primary);color:var(--xr-primary)}
+.xr-body{flex:1;min-height:0;overflow:auto;padding:12px 2px 8px}
+.xr-body.is-hidden{display:none}
+.xr-cards{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:820px){.xr-cards{grid-template-columns:1fr}}
+.xr-card{background:var(--xr-card);border:1px solid var(--xr-line);border-radius:14px;padding:14px 14px 15px;box-shadow:var(--xr-shadow)}
+.xr-card-title{font-size:16px;font-weight:700;letter-spacing:.2px}
+.xr-card-sub{font-size:12px;color:var(--xr-sub);margin-top:5px}
+.xr-label{font-size:12px;color:var(--xr-sub);margin:10px 0 6px}
+.xr-id-row{display:flex;align-items:center;gap:8px;background:var(--xr-id-bg);border:1px solid var(--xr-line);border-radius:10px;padding:5px 6px 5px 13px}
+.xr-id{flex:1;font-size:21px;font-weight:700;letter-spacing:1.2px;color:var(--xr-id-fg);font-variant-numeric:tabular-nums}
+.xr-ico{width:28px;height:28px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--xr-sub);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.xr-ico:hover{color:var(--xr-primary);border-color:var(--xr-line);background:rgba(124,77,255,.06)}
+.xr-ico svg{width:15px;height:15px}
+.xr-ghost-btn{border:1px solid var(--xr-line);background:transparent;color:var(--xr-sub);border-radius:8px;font-size:12px;padding:5px 10px;cursor:pointer}
+.xr-ghost-btn:hover{color:var(--xr-primary);border-color:var(--xr-primary)}
+.xr-pwd-row{display:flex;align-items:center;gap:4px;background:var(--xr-id-bg);border:1px solid var(--xr-line);border-radius:10px;padding:5px 6px 5px 13px}
+.xr-pwd{flex:1;font-size:19px;font-weight:600;letter-spacing:2px;color:var(--xr-id-fg);font-variant-numeric:tabular-nums}
+.xr-input{width:100%;box-sizing:border-box;background:var(--xr-id-bg);border:1px solid var(--xr-line);border-radius:10px;padding:9px 12px;font-size:19px;font-weight:600;letter-spacing:1.2px;color:var(--xr-id-fg);outline:none;font-variant-numeric:tabular-nums}
+.xr-input::placeholder{font-size:13px;font-weight:400;letter-spacing:0;color:var(--xr-sub)}
+.xr-input:focus{border-color:var(--xr-primary)}
+.xr-primary{width:100%;margin-top:11px;border:0;border-radius:10px;padding:10px;background:linear-gradient(180deg,var(--xr-primary-hi),var(--xr-primary));color:#fff;font-size:14px;font-weight:700;letter-spacing:.5px;cursor:pointer;box-shadow:0 6px 16px rgba(124,77,255,.28)}
+.xr-primary:hover{filter:brightness(1.05)}
+.xr-primary:disabled{opacity:.6;cursor:default;box-shadow:none}
+.xr-tip{margin-top:8px;font-size:12px;color:var(--xr-sub);line-height:1.55}
+.xr-tip.is-bad{color:#d9534f}
+.xr-tip.is-ok{color:#2e9e6b}
+.xr-recent-head{display:flex;align-items:center;justify-content:space-between;margin:14px 2px 10px}
+.xr-recent-title{font-size:13px;font-weight:700}
+.xr-select{border:1px solid var(--xr-line);background:var(--xr-card);color:var(--xr-fg);border-radius:8px;font-size:12px;padding:5px 8px;outline:none}
+.xr-recent{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:12px;padding-bottom:6px}
+.xr-rc{position:relative;border-radius:12px;overflow:hidden;background:var(--xr-card);border:1px solid var(--xr-line);cursor:pointer;transition:transform .15s,box-shadow .15s}
+.xr-rc:hover{transform:translateY(-2px);box-shadow:var(--xr-shadow)}
+.xr-rc-thumb{height:78px;background:linear-gradient(135deg,#2b3a4d,#1c2531) center/cover no-repeat}
+.xr-rc-off{position:absolute;top:8px;left:8px;display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#f7f7fb;background:rgba(20,25,35,.55);border-radius:20px;padding:2px 8px 2px 6px}
+.xr-rc-off i{width:6px;height:6px;border-radius:50%;background:#b9c0cc;display:inline-block}
+.xr-rc-off.is-on i{background:#2ecc71}
+.xr-rc-more{position:absolute;top:6px;right:6px;width:22px;height:22px;border-radius:50%;border:0;background:rgba(255,255,255,.86);color:#33384a;font-size:12px;line-height:1;cursor:pointer}
+.xr-rc-meta{background:var(--xr-card);padding:7px 9px 8px}
+.xr-rc-host{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.xr-rc-id{font-size:11px;color:var(--xr-sub);margin-top:3px;font-variant-numeric:tabular-nums}
+.xr-rc-go{position:absolute;right:8px;bottom:8px;width:24px;height:24px;border-radius:50%;background:rgba(124,77,255,.12);color:var(--xr-primary);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+.xr-empty{font-size:12px;color:var(--xr-sub);padding:10px 2px}
+.xr-foot{display:flex;align-items:center;gap:8px;padding:10px 4px 11px;border-top:1px solid var(--xr-line);font-size:12px;color:var(--xr-sub);flex-shrink:0}
+.xr-dot{width:7px;height:7px;border-radius:50%;background:#2ecc71;flex-shrink:0}
+.xr-dot.is-off{background:#e2534b}
+.xr-foot-ver{margin-left:auto;opacity:.75}
+
+/* 调试面板内卡边框减淡，避免双重描边 */
         :root:not([data-theme="dark"]) .debug-workspace-panel .plugin-inventory-section { border-color: rgba(255, 255, 255, .6) !important; }
 
         /* ===== XQ UI POLISH v5 —— 调试页操作行入框 / Hook 排版疏朗 / 深色对齐浅色 / 字体提亮 ===== */
@@ -10201,26 +10283,129 @@ function createHookDecryptSection() {
     return section;
 }
 
+function createRemoteDebugSection() {
+    const section = document.createElement('section');
+    section.className = 'xr-wrap';
+    const svgEye = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"></path><circle cx="12" cy="12" r="2.6"></circle></svg>';
+    const svgRefresh = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.4-5.7"></path><path d="M20.5 4v4.4h-4.4"></path></svg>';
+    const svgEdit = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4-10 10v4z"></path><path d="M14.5 5.5 17.5 8.5"></path></svg>';
+    const svgMenu = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>';
+    const svgArrow = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13"></path><path d="M13 7l5 5-5 5"></path></svg>';
+
+    section.innerHTML = `
+        <div class="xr-top">
+            <div class="xr-tabs" role="tablist" aria-label="远程调试连接方式">
+                <button type="button" class="xr-tab is-active" role="tab" aria-selected="true" data-xr-mode="id">ID 连接</button>
+                <button type="button" class="xr-tab" role="tab" aria-selected="false" data-xr-mode="ip">IP 连接</button>
+                <button type="button" class="xr-tab" role="tab" aria-selected="false" data-xr-mode="wall">桌面墙</button>
+            </div>
+            <button type="button" class="xr-menu" id="xrOpenBtn" title="打开 X·Q Desk">${svgMenu}</button>
+        </div>
+
+        <div class="xr-body" data-xr-pane="id">
+            <div class="xr-cards">
+                <div class="xr-card">
+                    <div class="xr-card-title">本桌面</div>
+                    <div class="xr-card-sub">将 ID 和密码分享给连接方</div>
+                    <div class="xr-label">本机 ID</div>
+                    <div class="xr-id-row">
+                        <span class="xr-id" id="xrSelfId">-- -- --</span>
+                        <button type="button" class="xr-ghost-btn" id="xrCopyId">复制</button>
+                    </div>
+                    <div class="xr-label">密码</div>
+                    <div class="xr-pwd-row">
+                        <span class="xr-pwd" id="xrSelfPwd">••••••</span>
+                        <button type="button" class="xr-ico" id="xrEyeBtn" title="显示或隐藏密码">${svgEye}</button>
+                        <button type="button" class="xr-ico" id="xrRefreshBtn" title="重新读取">${svgRefresh}</button>
+                        <button type="button" class="xr-ico" id="xrEditBtn" title="在 X·Q Desk 里修改密码">${svgEdit}</button>
+                    </div>
+                </div>
+                <div class="xr-card">
+                    <div class="xr-card-title">远程桌面</div>
+                    <div class="xr-card-sub">输入设备 ID，连接远程桌面</div>
+                    <div class="xr-label">对端 ID</div>
+                    <input class="xr-input" id="xrPeerId" inputmode="numeric" maxlength="13" placeholder="请输入远程 ID" autocomplete="off" spellcheck="false">
+                    <button type="button" class="xr-primary" id="xrConnectBtn">连接</button>
+                    <div class="xr-tip" id="xrTip"></div>
+                </div>
+            </div>
+            <div class="xr-recent-head">
+                <span class="xr-recent-title">近期连接</span>
+                <select class="xr-select" id="xrRecentFilter"><option>全部设备</option></select>
+            </div>
+            <div class="xr-recent" id="xrRecentList"></div>
+        </div>
+
+        <div class="xr-body is-hidden" data-xr-pane="ip">
+            <div class="xr-cards">
+                <div class="xr-card">
+                    <div class="xr-card-title">IP 直连</div>
+                    <div class="xr-card-sub">同一局域网内可跳过 ID 服务器直接连</div>
+                    <div class="xr-label">对方 IP 地址</div>
+                    <input class="xr-input" id="xrIpInput" placeholder="例如 192.168.1.23" autocomplete="off" spellcheck="false">
+                    <button type="button" class="xr-primary" id="xrIpConnectBtn">复制并打开 X·Q Desk</button>
+                    <div class="xr-tip" id="xrIpTip">需要对方在 X·Q Desk 里开启「允许 IP 直接连接」</div>
+                </div>
+                <div class="xr-card">
+                    <div class="xr-card-title">当前设置</div>
+                    <div class="xr-card-sub">这些项目只能在 X·Q Desk 里改</div>
+                    <div class="xr-tip" style="margin-top:14px">
+                        端口：<b id="xrIpPort">52888</b><br>
+                        IP 直连：<b id="xrIpEnabled">未知</b><br>
+                        自建服务器：<b id="xrSelfHosted">未知</b>
+                    </div>
+                    <button type="button" class="xr-ghost-btn" id="xrIpOpenBtn" style="margin-top:14px">打开 X·Q Desk 设置</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="xr-body is-hidden" data-xr-pane="wall">
+            <div class="xr-card">
+                <div class="xr-card-title">桌面墙</div>
+                <div class="xr-card-sub">在 X·Q Desk 里把多台设备排成一面墙，这里只做入口</div>
+                <div class="xr-tip" style="margin-top:14px">桌面墙的布局、分屏和轮播由 X·Q Desk 自己管理，工具箱不去改它的配置。</div>
+                <button type="button" class="xr-primary" id="xrWallOpenBtn" style="max-width:240px">打开 X·Q Desk 桌面墙</button>
+            </div>
+        </div>
+
+        <div class="xr-foot">
+            <span class="xr-dot" id="xrDot"></span>
+            <span id="xrFootState">正在读取…</span>
+            <span class="xr-foot-ver" id="xrFootVer"></span>
+        </div>
+    `;
+    if (window.xqRemoteMount) {
+        window.xqRemoteMount(section);
+    } else {
+        setTimeout(function () { if (window.xqRemoteMount) window.xqRemoteMount(section); }, 0);
+    }
+    return section;
+}
+
 function createDebugWorkspaceTabs() {
     const workspace = document.createElement('section');
     workspace.className = 'debug-workspace';
     workspace.innerHTML = `
         <div class="debug-workspace-tabs" role="tablist" aria-label="调试工具功能">
             <button type="button" class="debug-workspace-tab is-active" role="tab" aria-selected="true" data-debug-tab="tools">调试工具</button>
+            <button type="button" class="debug-workspace-tab" role="tab" aria-selected="false" data-debug-tab="remote">远程调试</button>
             <button type="button" class="debug-workspace-tab" role="tab" aria-selected="false" data-debug-tab="file-decrypt">文件解密</button>
             <button type="button" class="debug-workspace-tab" role="tab" aria-selected="false" data-debug-tab="hook-decrypt">Hook解密</button>
             <button type="button" class="debug-workspace-tab" role="tab" aria-selected="false" data-debug-tab="downgrade">工程降级</button>
         </div>
         <div class="debug-workspace-panel" data-debug-panel="tools"></div>
+        <div class="debug-workspace-panel is-hidden" data-debug-panel="remote"></div>
         <div class="debug-workspace-panel is-hidden" data-debug-panel="file-decrypt"></div>
         <div class="debug-workspace-panel is-hidden" data-debug-panel="hook-decrypt"></div>
         <div class="debug-workspace-panel is-hidden" data-debug-panel="downgrade"></div>
     `;
     const toolsPanel = workspace.querySelector('[data-debug-panel="tools"]');
+    const remotePanel = workspace.querySelector('[data-debug-panel="remote"]');
     const fileDecryptPanel = workspace.querySelector('[data-debug-panel="file-decrypt"]');
     const hookDecryptPanel = workspace.querySelector('[data-debug-panel="hook-decrypt"]');
     const downgradePanel = workspace.querySelector('[data-debug-panel="downgrade"]');
     toolsPanel.appendChild(createDebugToolsSection());
+    remotePanel.appendChild(createRemoteDebugSection());
     const inspectionTabs = document.createElement('div');
     inspectionTabs.className = 'debug-inspection-workspace';
     inspectionTabs.innerHTML = `

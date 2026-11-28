@@ -56,6 +56,14 @@
     var s = String(message || '');
     if (window.__xqMaintHandle && window.__xqMaintHandle(s)) { return true; }
     if (handleUpdateMessage(s)) { return true; }
+    if (s.indexOf('remote_state|') === 0) {
+      try { xrRender(JSON.parse(s.slice('remote_state|'.length))); } catch (e) { /* ignore */ }
+      return true;
+    }
+    if (s.indexOf('remote_action|') === 0) {
+      try { xrOnAction(JSON.parse(s.slice('remote_action|'.length))); } catch (e) { /* ignore */ }
+      return true;
+    }
     if (s.indexOf('my_library_notice|') === 0) {
       libNotice(s.slice('my_library_notice|'.length));
       return true;
@@ -684,6 +692,7 @@
     var tot = (Number(pg.total) || 0) / 1048576;
     var spd = (Number(pg.speed) || 0) / 1048576;
     if (pg.phase === 'download') {
+      txt.style.color = '';
       txt.textContent = '正在下载 ' + pct + '%' + (tot > 0.1 ? '（' + mb.toFixed(1) + ' / ' + tot.toFixed(1) + ' MB）' : '') +
         (spd > 0.05 ? ' · ' + spd.toFixed(2) + ' MB/s' : '');
     } else if (pg.phase === 'verify') {
@@ -816,6 +825,195 @@
     }
     return false;
   }
+  // ---------------------------------------------------------------
+  // 远程调试：把 X·Q Desk 的本机 ID / 密码 / 近期连接搬到调试页
+  // ---------------------------------------------------------------
+  var xrRoot = null;
+  var xrData = null;
+  var xrShowPwd = false;
+
+  function xrFmtId(value) {
+    var digits = String(value || '').replace(/\D/g, '');
+    if (digits.length === 9) return digits.slice(0, 3) + ' ' + digits.slice(3, 6) + ' ' + digits.slice(6);
+    return digits || '-- -- --';
+  }
+
+  function xrFmtTime(sec) {
+    var n = Number(sec) || 0;
+    if (n <= 0) return '';
+    var d = new Date(n * 1000);
+    if (isNaN(d.getTime())) return '';
+    var mm = ('0' + (d.getMonth() + 1)).slice(-2);
+    var dd = ('0' + d.getDate()).slice(-2);
+    var hh = ('0' + d.getHours()).slice(-2);
+    var mi = ('0' + d.getMinutes()).slice(-2);
+    return mm + '-' + dd + ' ' + hh + ':' + mi;
+  }
+
+  function xrSetTip(el, text, kind) {
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'xr-tip' + (kind === 'ok' ? ' is-ok' : kind === 'bad' ? ' is-bad' : '');
+  }
+
+  function xrRenderRecent(rows) {
+    var list = xrRoot && xrRoot.querySelector('#xrRecentList');
+    if (!list) return;
+    if (!rows || !rows.length) {
+      list.innerHTML = '<div class="xr-empty">还没有连接记录。连过一次之后，这里会留着他那台机器的 ID 和缩略图。</div>';
+      return;
+    }
+    var html = '';
+    rows.forEach(function (row) {
+      var id = String(row.id || '');
+      var host = row.host || ('设备 ' + xrFmtId(id));
+      var stamp = xrFmtTime(row.last);
+      var thumbStyle = row.thumb ? " style=\"background-image:url('" + row.thumb + "')\"" : '';
+      html += '<div class="xr-rc" data-peer="' + escHtml(id) + '" title="点击填入对端 ID">' +
+        '<div class="xr-rc-thumb"' + thumbStyle + '></div>' +
+        (stamp ? '<div class="xr-rc-off"><i></i>' + escHtml(stamp) + '</div>' : '') +
+        '<div class="xr-rc-meta"><div class="xr-rc-host">' + escHtml(host) + '</div>' +
+        '<div class="xr-rc-id">' + escHtml(id) + '</div></div>' +
+        '<span class="xr-rc-go">→</span>' +
+        '</div>';
+    });
+    list.innerHTML = html;
+    list.querySelectorAll('.xr-rc').forEach(function (card) {
+      card.addEventListener('click', function () {
+        var peer = card.getAttribute('data-peer') || '';
+        var input = xrRoot.querySelector('#xrPeerId');
+        if (input) { input.value = peer; input.focus(); }
+        xrSetTip(xrRoot.querySelector('#xrTip'), '已填入 ' + peer + '，点「连接」开始', '');
+      });
+    });
+  }
+
+  function xrRender(state) {
+    if (!xrRoot) return;
+    xrData = state || {};
+    var self = xrData.self || {};
+    var app = xrData.app || {};
+    var cfg = xrData.cfg || {};
+    var idEl = xrRoot.querySelector('#xrSelfId');
+    if (idEl) idEl.textContent = xrFmtId(self.id);
+    var pwdEl = xrRoot.querySelector('#xrSelfPwd');
+    if (pwdEl) pwdEl.textContent = self.password ? (xrShowPwd ? self.password : '••••••') : '未设置';
+    var dot = xrRoot.querySelector('#xrDot');
+    var foot = xrRoot.querySelector('#xrFootState');
+    var online = !!self.online;
+    if (dot) dot.className = 'xr-dot' + (online ? '' : ' is-off');
+    if (foot) {
+      foot.textContent = online ? '已连接服务器'
+        : (xrData.available ? 'X·Q Desk 在运行，但没连上服务器' : '未检测到 X·Q Desk');
+    }
+    var ver = xrRoot.querySelector('#xrFootVer');
+    if (ver) ver.textContent = app.version ? 'v' + app.version : '';
+    var portEl = xrRoot.querySelector('#xrIpPort');
+    if (portEl) portEl.textContent = cfg.port || 52888;
+    var ipEl = xrRoot.querySelector('#xrIpEnabled');
+    if (ipEl) ipEl.textContent = cfg.ip_direct ? '已开启' : '未开启';
+    var shEl = xrRoot.querySelector('#xrSelfHosted');
+    if (shEl) shEl.textContent = cfg.self_hosted ? '已启用' : '未启用';
+    if (!xrData.available) {
+      xrSetTip(xrRoot.querySelector('#xrTip'), xrData.msg || '未检测到 X·Q Desk', 'bad');
+    }
+    xrRenderRecent(xrData.recent);
+  }
+
+  function xrOnAction(res) {
+    if (!xrRoot) return;
+    var isIp = res && res.target === 'ip';
+    var tip = xrRoot.querySelector(isIp ? '#xrIpTip' : '#xrTip');
+    var btn = xrRoot.querySelector('#xrConnectBtn');
+    if (btn) { btn.disabled = false; btn.textContent = '连接'; }
+    if (res && res.state) xrRender(res.state);
+    if (res && res.ok) {
+      xrSetTip(tip, res.msg || '已复制，去 X·Q Desk 里确认连接', 'ok');
+    } else {
+      xrSetTip(tip, (res && res.msg) || '操作失败', 'bad');
+    }
+  }
+
+  function xrDoConnect() {
+    if (!xrRoot) return;
+    var input = xrRoot.querySelector('#xrPeerId');
+    var btn = xrRoot.querySelector('#xrConnectBtn');
+    var tip = xrRoot.querySelector('#xrTip');
+    var peer = String((input && input.value) || '').replace(/\D/g, '');
+    if (!peer) { xrSetTip(tip, '请输入对方设备的 ID', 'bad'); if (input) input.focus(); return; }
+    if (peer.length < 6) { xrSetTip(tip, 'ID 位数不对，通常是 9 位数字', 'bad'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = '准备中…'; }
+    xrSetTip(tip, '正在复制 ID 并打开 X·Q Desk…', '');
+    postCommand('remote_connect|' + encodeURIComponent(peer));
+  }
+
+  window.xqRemoteMount = function (root) {
+    xrRoot = root;
+    var tabs = root.querySelectorAll('.xr-tab');
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        var mode = tab.getAttribute('data-xr-mode');
+        tabs.forEach(function (other) {
+          var on = other === tab;
+          other.classList.toggle('is-active', on);
+          other.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        root.querySelectorAll('[data-xr-pane]').forEach(function (pane) {
+          pane.classList.toggle('is-hidden', pane.getAttribute('data-xr-pane') !== mode);
+        });
+      });
+    });
+    var tip = root.querySelector('#xrTip');
+    var copyBtn = root.querySelector('#xrCopyId');
+    if (copyBtn) copyBtn.addEventListener('click', function () {
+      postCommand('remote_copy|id');
+    });
+    var refreshBtn = root.querySelector('#xrRefreshBtn');
+    if (refreshBtn) refreshBtn.addEventListener('click', function () {
+      xrSetTip(tip, '正在重新读取 X·Q Desk…', '');
+      postCommand('remote_state');
+    });
+    var eyeBtn = root.querySelector('#xrEyeBtn');
+    if (eyeBtn) eyeBtn.addEventListener('click', function () {
+      xrShowPwd = !xrShowPwd;
+      xrRender(xrData || {});
+    });
+    var editBtn = root.querySelector('#xrEditBtn');
+    if (editBtn) editBtn.addEventListener('click', function () {
+      postCommand('remote_open');
+      xrSetTip(tip, '已打开 X·Q Desk：密码在它的「设置 → 安全」里改，改完点刷新', '');
+    });
+    var connectBtn = root.querySelector('#xrConnectBtn');
+    if (connectBtn) connectBtn.addEventListener('click', xrDoConnect);
+    var peerInput = root.querySelector('#xrPeerId');
+    if (peerInput) {
+      peerInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') xrDoConnect();
+      });
+      peerInput.addEventListener('input', function () {
+        var cleaned = String(peerInput.value || '').replace(/[^\d]/g, '').slice(0, 12);
+        if (cleaned !== peerInput.value) peerInput.value = cleaned;
+      });
+    }
+    ['#xrOpenBtn', '#xrIpOpenBtn', '#xrWallOpenBtn'].forEach(function (sel) {
+      var btn = root.querySelector(sel);
+      if (btn) btn.addEventListener('click', function () { postCommand('remote_open'); });
+    });
+    var ipBtn = root.querySelector('#xrIpConnectBtn');
+    if (ipBtn) ipBtn.addEventListener('click', function () {
+      var ipInput = root.querySelector('#xrIpInput');
+      var ipTip = root.querySelector('#xrIpTip');
+      var ip = String((ipInput && ipInput.value) || '').trim();
+      if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
+        xrSetTip(ipTip, 'IP 格式不对，例如 192.168.1.23', 'bad');
+        return;
+      }
+      xrSetTip(ipTip, '已复制 IP，正在打开 X·Q Desk…', '');
+      postCommand('remote_clip|' + encodeURIComponent(ip));
+    });
+    postCommand('remote_state');
+  };
+
   window.xqUpdRefresh = function () { postCommand('update_state'); };
   window.xqAutostartRefresh = function () { postCommand('autostart_state'); };
   window.xqAutostartSet = function (on) { postCommand('autostart_set|' + (on ? '1' : '0')); };
